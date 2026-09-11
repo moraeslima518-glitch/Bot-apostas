@@ -1,7 +1,7 @@
 import requests
 from telegram import Bot
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import os
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8149908189:AAHFMRSC2bLav_sgomd9aaw5aBaeNPapuHg")
@@ -16,46 +16,52 @@ HEADERS = {
 LIGAS_PRINCIPAIS = [71, 72, 39, 2, 13, 140, 307, 61]
 
 bot = Bot(token=TELEGRAM_TOKEN)
+jogos_pre_notificados = set()
 
-async def varrer_pre_jogo_ligas():
-    hoje = datetime.now().strftime("%Y-%m-%d")
+async def verificar_entradas_pre_jogo():
+    agora_utc = datetime.now(timezone.utc)
+    hoje = agora_utc.strftime("%Y-%m-%d")
     url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
     
     try:
         response = requests.get(url, headers=HEADERS).json()
         jogos = response.get("response", [])
         
-        jogos_filtrados = [
-            j for j in jogos 
-            if j["league"]["id"] in LIGAS_PRINCIPAIS and j["fixture"]["status"]["short"] == "NS"
-        ]
-        
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"📋 **PRÉ-JOGO (LIGAS SELECIONADAS)**\nEncontrados {len(jogos_filtrados)} jogos importantes para hoje.",
-            parse_mode="Markdown"
-        )
-        
-        for jogo in jogos_filtrados[:3]:
-            liga = jogo["league"]["name"]
-            pais = jogo["league"]["country"]
-            casa = jogo["teams"]["home"]["name"]
-            fora = jogo["teams"]["away"]["name"]
-            horario = jogo["fixture"]["date"][11:16]
+        for jogo in jogos:
+            fixture_id = jogo["fixture"]["id"]
+            if fixture_id in jogos_pre_notificados:
+                continue
+                
+            liga_id = jogo["league"]["id"]
+            status = jogo["fixture"]["status"]["short"]
+            
+            if liga_id in LIGAS_PRINCIPAIS and status == "NS":
+                data_jogo_str = jogo["fixture"]["date"]
+                data_jogo = datetime.fromisoformat(data_jogo_str.replace("Z", "+00:00"))
+                
+                diferenca_minutos = (data_jogo - agora_utc).total_seconds() / 60
+                
+                # Se faltar entre 10 e 35 minutos para o jogo começar
+                if 10 <= diferenca_minutos <= 35:
+                    liga = jogo["league"]["name"]
+                    pais = jogo["league"]["country"]
+                    casa = jogo["teams"]["home"]["name"]
+                    fora = jogo["teams"]["away"]["name"]
+                    horario_br = (data_jogo - timedelta(hours=3)).strftime("%H:%M")
 
-            msg = (
-                f"🎯 **ANÁLISE PRÉ-JOGO**\n\n"
-                f"🏆 **Liga:** {pais} - {liga}\n"
-                f"⚔️ **Confronto:** {casa} x {fora}\n"
-                f"⏰ **Horário:** {horario} UTC\n\n"
-                f"📊 **Projeções:**\n"
-                f"👑 **Favorito:** {casa}\n"
-                f"⚽ **Gols:** Média para Over 0.5 HT / Over 2.5 FT\n"
-                f"🚩 **Escanteios:** Média > 4.5 Cantos HT / > 9.5 FT\n"
-                f"🟨 **Cartões:** Tendência de partida movimentada"
-            )
-            await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
-            await asyncio.sleep(1.5)
+                    msg = (
+                        f"🚨 **ENTRADA PRÉ-JOGO (INÍCIO EM BRIEFING)**\n\n"
+                        f"🏆 **Liga:** {pais} - {liga}\n"
+                        f"⚔️ **Confronto:** {casa} x {fora}\n"
+                        f"⏰ **Início:** {horario_br} (Horário de Brasília)\n\n"
+                        f"📊 **Sugestão de Entrada Pré-Jogo:**\n"
+                        f"⚽ **Gols:** Over 1.5 Gols na Partida / Over 0.5 HT\n"
+                        f"🚩 **Escanteios:** Over 8.5 Cantos no Jogo\n"
+                        f"💡 **Recomendação:** Gestão de 1 a 2 unidades."
+                    )
+                    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+                    jogos_pre_notificados.add(fixture_id)
+                    await asyncio.sleep(1.5)
 
     except Exception as e:
         print(f"Erro no Pré-Jogo: {e}")
@@ -68,11 +74,6 @@ async def monitorar_jogos_ao_vivo():
         jogos_live = response.get("response", [])
         
         if not jogos_live:
-            await bot.send_message(
-                chat_id=CHAT_ID,
-                text="📡 **AO VIVO:** Nenhuma partida em andamento no momento.",
-                parse_mode="Markdown"
-            )
             return
 
         alertas_enviados = 0
@@ -119,13 +120,6 @@ async def monitorar_jogos_ao_vivo():
                 
             await asyncio.sleep(1.5)
 
-        if alertas_enviados == 0:
-            await bot.send_message(
-                chat_id=CHAT_ID,
-                text="📡 **AO VIVO:** Jogos analisados, mas nenhum está dentro das janelas do 1º Tempo (15'-40') ou 2º Tempo (60'-85').",
-                parse_mode="Markdown"
-            )
-
     except Exception as e:
         print(f"Erro no Ao Vivo: {e}")
 
@@ -133,20 +127,14 @@ async def main():
     print("🚀 Bot iniciado no Render (Modo Autônomo 24/7)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Ligado na Nuvem (Render)!**\nO monitoramento autônomo está ativo 24/7.",
+        text="🤖 **Bot de Apostas Atualizado!**\nAgora enviando também Entradas Pré-Jogo (30 min antes) e Alertas Ao Vivo.",
         parse_mode="Markdown"
     )
     
-    contador_pre_jogo = 0
-    
     while True:
         try:
+            await verificar_entradas_pre_jogo()
             await monitorar_jogos_ao_vivo()
-            
-            if contador_pre_jogo % 12 == 0:
-                await varrer_pre_jogo_ligas()
-            
-            contador_pre_jogo += 1
             await asyncio.sleep(300)
             
         except Exception as e:
@@ -155,4 +143,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
- 
+
