@@ -1,10 +1,10 @@
-De Python:3.10-slim
+FROM python:3.10-slim
 
-TRABALHO / app
+WORKDIR /app
 
-Cópia requirements.txt.
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-Cópia main.py.
+COPY main.py .
 
 CMD ["python", "main.py"]
