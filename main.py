@@ -41,7 +41,6 @@ async def verificar_entradas_pre_jogo():
                 
                 diferenca_minutos = (data_jogo - agora_utc).total_seconds() / 60
                 
-                # Janela ampliada: avisa entre 10 e 60 minutos antes do kickoff
                 if 10 <= diferenca_minutos <= 60:
                     liga = jogo["league"]["name"]
                     pais = jogo["league"]["country"]
@@ -87,7 +86,8 @@ async def monitorar_jogos_ao_vivo():
             gols_fora = jogo["goals"]["away"]
             liga = jogo["league"]["name"]
 
-            if status_curto == "1H" and 15 <= tempo <= 40:
+            # Alterado de 15 para 5 minutos no 1º tempo
+            if status_curto == "1H" and 5 <= tempo <= 40:
                 msg_live = (
                     f"🔥 **ALERTA PRESSÃO - 1º TEMPO ({tempo}')**\n\n"
                     f"🏆 **Liga:** {liga}\n"
@@ -101,7 +101,8 @@ async def monitorar_jogos_ao_vivo():
                 await bot.send_message(chat_id=CHAT_ID, text=msg_live, parse_mode="Markdown")
                 alertas_enviados += 1
 
-            elif status_curto == "2H" and 60 <= tempo <= 85:
+            # Alterado de 60 para 50 minutos no 2º tempo
+            elif status_curto == "2H" and 50 <= tempo <= 85:
                 msg_live = (
                     f"🔥 **ALERTA PRESSÃO - 2º TEMPO ({tempo}')**\n\n"
                     f"🏆 **Liga:** {liga}\n"
@@ -127,7 +128,7 @@ async def main():
     print("🚀 Bot iniciado no Render (Modo Autônomo 24/7)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Atualizado!**\nMargem pré-jogo ampliada (10 a 60 min antes do jogo).",
+        text="🤖 **Bot de Apostas Atualizado!**\nJanelas de pressão ao vivo ajustadas: 5'–40' (1ºT) e 50'–85' (2ºT).",
         parse_mode="Markdown"
     )
     
