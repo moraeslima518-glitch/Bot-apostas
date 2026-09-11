@@ -1,39 +1,62 @@
-Importação requests
- De telegram   import Bot
-Importação asyncio
-De datetime import datetime, timezone, timedelta
-Importação  os
+import requests
+from telegram import Bot
+import asyncio
+from datetime import datetime, timezone, timedelta
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# --- SERVIDOR WEB MÍNIMO PARA O RENDER ---
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot Ativo e Operacional!")
+
+    def log_message(self, format, *args):
+        return # Desativa os logs de acessos HTTP para nao poluir o terminal
+
+def rodar_servidor_web():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
+    print(f"🌐 Servidor web iniciado na porta {port} para o Render.")
+    server.serve_forever()
+
+# Inicia o servidor HTTP em uma thread separada antes de rodar o bot
+threading.Thread(target=rodar_servidor_web, daemon=True).start()
+
+# --- CONFIGURAÇÕES DO BOT ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8149908189:AAHFMRSC2bLav_sgomd9aaw5aBaeNPapuHg")
 CHAT_ID = os.getenv("CHAT_ID", "8195281163")
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "F909208C46MSHE2A1D04DFD2CACBP18ADB4JSN38F2C5EEA4B4")
 
-CABEÇALHOS = {
+HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
     "x-rapidapi-host": "v3.football.api-sports.io"
 }
 
- LIGAS_PRINCIPAIS =   [71, 72, 39, 2, 13, 140, 307, 61]
+LIGAS_PRINCIPAIS = [71, 72, 39, 2, 13, 140, 307, 61]
 
-Bot = Bot(token=TELEGRAM_TOKEN)
- jogos_pre_notificados =   set()
+bot = Bot(token=TELEGRAM_TOKEN)
+jogos_pre_notificados = set()
 
-Assínculo  def verificar_entradas_pre_jogo():
- Agora_utc = data-tempo. now(timezone.utc)
-      hoje = agora_utc.  strftime("%Y-%m-%d")
- URL = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
+async def verificar_entradas_pre_jogo():
+    agora_utc = datetime.now(timezone.utc)
+    hoje = agora_utc.strftime("%Y-%m-%d")
+    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
     
     try:
- Resposta = Pedidos. get(url, headers=HEADERS).json()
-          jogos = response.  get("response", [])
+        response = requests.get(url, headers=HEADERS).json()
+        jogos = response.get("response", [])
         
-        for  jogo  in  jogos:
- fixture_id = jogo ["fixture"]["id"]
-            if fixture_id in  jogos_pre_notificados:
+        for jogo in jogos:
+            fixture_id = jogo["fixture"]["id"]
+            if fixture_id in jogos_pre_notificados:
                 continue
                 
-             liga_id = jogo ["league"]["id"]
- Status = Jogo ["fixture"]["status"]["short"]
+            liga_id = jogo["league"]["id"]
+            status = jogo["fixture"]["status"]["short"]
             
             if liga_id in LIGAS_PRINCIPAIS and status == "NS":
                 data_jogo_str = jogo["fixture"]["date"]
@@ -86,7 +109,6 @@ async def monitorar_jogos_ao_vivo():
             gols_fora = jogo["goals"]["away"]
             liga = jogo["league"]["name"]
 
-            # Alterado de 15 para 5 minutos no 1º tempo
             if status_curto == "1H" and 5 <= tempo <= 40:
                 msg_live = (
                     f"🔥 **ALERTA PRESSÃO - 1º TEMPO ({tempo}')**\n\n"
@@ -101,7 +123,6 @@ async def monitorar_jogos_ao_vivo():
                 await bot.send_message(chat_id=CHAT_ID, text=msg_live, parse_mode="Markdown")
                 alertas_enviados += 1
 
-            # Alterado de 60 para 50 minutos no 2º tempo
             elif status_curto == "2H" and 50 <= tempo <= 85:
                 msg_live = (
                     f"🔥 **ALERTA PRESSÃO - 2º TEMPO ({tempo}')**\n\n"
@@ -125,10 +146,10 @@ async def monitorar_jogos_ao_vivo():
         print(f"Erro no Ao Vivo: {e}")
 
 async def main():
-    print("🚀 Bot iniciado no Render (Modo Autônomo 24/7)!")
+    print("🚀 Bot iniciado no Render (Modo Web Service com Porta Ativa)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Atualizado!**\nJanelas de pressão ao vivo ajustadas: 5'–40' (1ºT) e 50'–85' (2ºT).",
+        text="🤖 **Bot de Apostas Atualizado!**\nServidor de checagem do Render ativado com sucesso.",
         parse_mode="Markdown"
     )
     
