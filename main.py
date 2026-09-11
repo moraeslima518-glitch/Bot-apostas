@@ -39,11 +39,9 @@ LIGAS_PRINCIPAIS = [71, 72, 39, 2, 13, 140, 307, 61]
 
 bot = Bot(token=TELEGRAM_TOKEN)
 jogos_pre_notificados = set()
-# Guarda o ultimo minuto notificado para evitar spam no mesmo minuto
-ultimos_alertas_tempo = {} 
+ultimos_alertas_tempo = {}
 
 def extrair_estatistica(stats, tipo):
-    """Auxiliar para extrair numeros de estatisticas da API"""
     total = 0
     for equipa in stats:
         for item in equipa.get("statistics", []):
@@ -75,13 +73,15 @@ async def verificar_entradas_pre_jogo():
             liga_id = jogo["league"]["id"]
             status = jogo["fixture"]["status"]["short"]
             
-            if liga_id in LIGAS_PRINCIPAIS and status == "NS":
+            # Aceita qualquer status de jogo que ainda não começou (NS, TBD)
+            if liga_id in LIGAS_PRINCIPAIS and status in ["NS", "TBD"]:
                 data_jogo_str = jogo["fixture"]["date"]
                 data_jogo = datetime.fromisoformat(data_jogo_str.replace("Z", "+00:00"))
                 
                 diferenca_minutos = (data_jogo - agora_utc).total_seconds() / 60
                 
-                if 10 <= diferenca_minutos <= 60:
+                # Janela ampliada: pega jogos que iniciam em até 2 horas (120 min)
+                if 0 <= diferenca_minutos <= 120:
                     liga = jogo["league"]["name"]
                     pais = jogo["league"]["country"]
                     casa = jogo["teams"]["home"]["name"]
@@ -128,11 +128,9 @@ async def monitorar_jogos_ao_vivo():
             tempo = jogo["fixture"]["status"]["elapsed"] or 0
             status_curto = jogo["fixture"]["status"]["short"]
             
-            # Só analisa se estiver com a bola rolando (1H ou 2H)
             if status_curto not in ["1H", "2H"]:
                 continue
 
-            # Evita alertar duas vezes no mesmo intervalo de 10 minutos
             ultimo_minuto_alertado = ultimos_alertas_tempo.get(fixture_id, -10)
             if (tempo - ultimo_minuto_alertado) < 10:
                 continue
@@ -143,7 +141,6 @@ async def monitorar_jogos_ao_vivo():
             gols_fora = jogo["goals"]["away"] or 0
             liga = jogo["league"]["name"]
 
-            # Buscar Estatísticas do Jogo ao Vivo
             url_stats = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
             res_stats = requests.get(url_stats, headers=HEADERS).json()
             stats_data = res_stats.get("response", [])
@@ -156,9 +153,6 @@ async def monitorar_jogos_ao_vivo():
             
             total_finalizacoes = chutes_no_gol + chutes_fora
 
-            # CONDICIONAL DE PRESSÃO REAL:
-            # 1. Muita pressão de finalizações (ex: 3+ chutes no gol ou 7+ finalizações)
-            # 2. Ou reta final de jogo (70'+ min) com jogo aberto
             alta_pressao_chutes = chutes_no_gol >= 3 or total_finalizacoes >= 7
             reta_final_pressao = (tempo >= 70) and (abs(gols_casa - gols_fora) <= 1)
 
@@ -194,10 +188,10 @@ async def monitorar_jogos_ao_vivo():
         print(f"Erro no Ao Vivo com Estatísticas: {e}")
 
 async def main():
-    print("🚀 Bot iniciado no Render (Filtro Inteligente de Pressão e Estatísticas)!")
+    print("🚀 Bot iniciado no Render (Pré-Jogo Ampliado 120min + Pressão Real)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Atualizado!**\nAgora analisando estatísticas em tempo real (chutes, cantos e pressão na reta final).",
+        text="🤖 **Bot de Apostas Atualizado!**\nJanela pré-jogo ampliada para até 2 horas de antecedência.",
         parse_mode="Markdown"
     )
     
