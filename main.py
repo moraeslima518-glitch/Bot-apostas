@@ -1,39 +1,39 @@
-import requests
-from telegram import Bot
-import asyncio
-from datetime import datetime, timezone, timedelta
-import os
+Importação requests
+ De telegram   import Bot
+Importação asyncio
+De datetime import datetime, timezone, timedelta
+Importação  os
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8149908189:AAHFMRSC2bLav_sgomd9aaw5aBaeNPapuHg")
 CHAT_ID = os.getenv("CHAT_ID", "8195281163")
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "F909208C46MSHE2A1D04DFD2CACBP18ADB4JSN38F2C5EEA4B4")
 
-HEADERS = {
+CABEÇALHOS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
     "x-rapidapi-host": "v3.football.api-sports.io"
 }
 
-LIGAS_PRINCIPAIS = [71, 72, 39, 2, 13, 140, 307, 61]
+ LIGAS_PRINCIPAIS =   [71, 72, 39, 2, 13, 140, 307, 61]
 
-bot = Bot(token=TELEGRAM_TOKEN)
-jogos_pre_notificados = set()
+Bot = Bot(token=TELEGRAM_TOKEN)
+ jogos_pre_notificados =   set()
 
-async def verificar_entradas_pre_jogo():
-    agora_utc = datetime.now(timezone.utc)
-    hoje = agora_utc.strftime("%Y-%m-%d")
-    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
+Assínculo  def verificar_entradas_pre_jogo():
+ Agora_utc = data-tempo. now(timezone.utc)
+      hoje = agora_utc.  strftime("%Y-%m-%d")
+ URL = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
     
     try:
-        response = requests.get(url, headers=HEADERS).json()
-        jogos = response.get("response", [])
+ Resposta = Pedidos. get(url, headers=HEADERS).json()
+          jogos = response.  get("response", [])
         
-        for jogo in jogos:
-            fixture_id = jogo["fixture"]["id"]
-            if fixture_id in jogos_pre_notificados:
+        for  jogo  in  jogos:
+ fixture_id = jogo ["fixture"]["id"]
+            if fixture_id in  jogos_pre_notificados:
                 continue
                 
-            liga_id = jogo["league"]["id"]
-            status = jogo["fixture"]["status"]["short"]
+             liga_id = jogo ["league"]["id"]
+ Status = Jogo ["fixture"]["status"]["short"]
             
             if liga_id in LIGAS_PRINCIPAIS and status == "NS":
                 data_jogo_str = jogo["fixture"]["date"]
