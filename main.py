@@ -41,8 +41,8 @@ async def verificar_entradas_pre_jogo():
                 
                 diferenca_minutos = (data_jogo - agora_utc).total_seconds() / 60
                 
-                # Se faltar entre 10 e 35 minutos para o jogo começar
-                if 10 <= diferenca_minutos <= 35:
+                # Janela ampliada: avisa entre 10 e 60 minutos antes do kickoff
+                if 10 <= diferenca_minutos <= 60:
                     liga = jogo["league"]["name"]
                     pais = jogo["league"]["country"]
                     casa = jogo["teams"]["home"]["name"]
@@ -50,7 +50,7 @@ async def verificar_entradas_pre_jogo():
                     horario_br = (data_jogo - timedelta(hours=3)).strftime("%H:%M")
 
                     msg = (
-                        f"🚨 **ENTRADA PRÉ-JOGO (INÍCIO EM BRIEFING)**\n\n"
+                        f"🚨 **ENTRADA PRÉ-JOGO (INÍCIO EM BREVE)**\n\n"
                         f"🏆 **Liga:** {pais} - {liga}\n"
                         f"⚔️ **Confronto:** {casa} x {fora}\n"
                         f"⏰ **Início:** {horario_br} (Horário de Brasília)\n\n"
@@ -127,7 +127,7 @@ async def main():
     print("🚀 Bot iniciado no Render (Modo Autônomo 24/7)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Atualizado!**\nAgora enviando também Entradas Pré-Jogo (30 min antes) e Alertas Ao Vivo.",
+        text="🤖 **Bot de Apostas Atualizado!**\nMargem pré-jogo ampliada (10 a 60 min antes do jogo).",
         parse_mode="Markdown"
     )
     
@@ -143,4 +143,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
