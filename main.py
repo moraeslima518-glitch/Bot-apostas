@@ -15,7 +15,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot Ativo e Operacional!")
 
     def log_message(self, format, *args):
-        return # Desativa os logs de acessos HTTP para nao poluir o terminal
+        return
 
 def rodar_servidor_web():
     port = int(os.getenv("PORT", 10000))
@@ -23,7 +23,6 @@ def rodar_servidor_web():
     print(f"🌐 Servidor web iniciado na porta {port} para o Render.")
     server.serve_forever()
 
-# Inicia o servidor HTTP em uma thread separada antes de rodar o bot
 threading.Thread(target=rodar_servidor_web, daemon=True).start()
 
 # --- CONFIGURAÇÕES DO BOT ---
@@ -40,6 +39,24 @@ LIGAS_PRINCIPAIS = [71, 72, 39, 2, 13, 140, 307, 61]
 
 bot = Bot(token=TELEGRAM_TOKEN)
 jogos_pre_notificados = set()
+# Guarda o ultimo minuto notificado para evitar spam no mesmo minuto
+ultimos_alertas_tempo = {} 
+
+def extrair_estatistica(stats, tipo):
+    """Auxiliar para extrair numeros de estatisticas da API"""
+    total = 0
+    for equipa in stats:
+        for item in equipa.get("statistics", []):
+            if item.get("type") == tipo:
+                val = item.get("value")
+                if val is not None:
+                    if str(val).endswith("%"):
+                        val = str(val).replace("%", "")
+                    try:
+                        total += int(val)
+                    except ValueError:
+                        pass
+    return total
 
 async def verificar_entradas_pre_jogo():
     agora_utc = datetime.now(timezone.utc)
@@ -76,9 +93,10 @@ async def verificar_entradas_pre_jogo():
                         f"🏆 **Liga:** {pais} - {liga}\n"
                         f"⚔️ **Confronto:** {casa} x {fora}\n"
                         f"⏰ **Início:** {horario_br} (Horário de Brasília)\n\n"
-                        f"📊 **Sugestão de Entrada Pré-Jogo:**\n"
+                        f"📊 **Sugestão de Entrada:**\n"
                         f"⚽ **Gols:** Over 1.5 Gols na Partida / Over 0.5 HT\n"
                         f"🚩 **Escanteios:** Over 8.5 Cantos no Jogo\n"
+                        f"🟨 **Cartões:** Over 3.5 Cartões no Jogo\n\n"
                         f"💡 **Recomendação:** Gestão de 1 a 2 unidades."
                     )
                     await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
@@ -101,40 +119,70 @@ async def monitorar_jogos_ao_vivo():
         alertas_enviados = 0
 
         for jogo in jogos_live:
+            fixture_id = jogo["fixture"]["id"]
+            liga_id = jogo["league"]["id"]
+
+            if liga_id not in LIGAS_PRINCIPAIS:
+                continue
+
             tempo = jogo["fixture"]["status"]["elapsed"] or 0
             status_curto = jogo["fixture"]["status"]["short"]
+            
+            # Só analisa se estiver com a bola rolando (1H ou 2H)
+            if status_curto not in ["1H", "2H"]:
+                continue
+
+            # Evita alertar duas vezes no mesmo intervalo de 10 minutos
+            ultimo_minuto_alertado = ultimos_alertas_tempo.get(fixture_id, -10)
+            if (tempo - ultimo_minuto_alertado) < 10:
+                continue
+
             casa = jogo["teams"]["home"]["name"]
             fora = jogo["teams"]["away"]["name"]
-            gols_casa = jogo["goals"]["home"]
-            gols_fora = jogo["goals"]["away"]
+            gols_casa = jogo["goals"]["home"] or 0
+            gols_fora = jogo["goals"]["away"] or 0
             liga = jogo["league"]["name"]
 
-            if status_curto == "1H" and 5 <= tempo <= 40:
-                msg_live = (
-                    f"🔥 **ALERTA PRESSÃO - 1º TEMPO ({tempo}')**\n\n"
-                    f"🏆 **Liga:** {liga}\n"
-                    f"⚔️ **Confronto:** {casa} {gols_casa} x {gols_fora} {fora}\n"
-                    f"⏱️ **Minuto:** {tempo}' (Primeiro Tempo)\n\n"
-                    f"🎯 **Indicadores Detectados:**\n"
-                    f"⚽ **Chance de Gol HT:** Alta movimentação ofensiva na etapa inicial.\n"
-                    f"🚩 **Escanteios HT:** Ritmo acelerado para cantos no 1º Tempo.\n\n"
-                    f"💡 *Sugestão:* Over 0.5 Gol HT ou Cantos Asiáticos HT."
-                )
-                await bot.send_message(chat_id=CHAT_ID, text=msg_live, parse_mode="Markdown")
-                alertas_enviados += 1
+            # Buscar Estatísticas do Jogo ao Vivo
+            url_stats = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
+            res_stats = requests.get(url_stats, headers=HEADERS).json()
+            stats_data = res_stats.get("response", [])
 
-            elif status_curto == "2H" and 50 <= tempo <= 85:
+            chutes_no_gol = extrair_estatistica(stats_data, "Shots on Goal")
+            chutes_fora = extrair_estatistica(stats_data, "Shots off Goal")
+            escanteios = extrair_estatistica(stats_data, "Corner Kicks")
+            cartoes_amarelos = extrair_estatistica(stats_data, "Yellow Cards")
+            cartoes_vermelhos = extrair_estatistica(stats_data, "Red Cards")
+            
+            total_finalizacoes = chutes_no_gol + chutes_fora
+
+            # CONDICIONAL DE PRESSÃO REAL:
+            # 1. Muita pressão de finalizações (ex: 3+ chutes no gol ou 7+ finalizações)
+            # 2. Ou reta final de jogo (70'+ min) com jogo aberto
+            alta_pressao_chutes = chutes_no_gol >= 3 or total_finalizacoes >= 7
+            reta_final_pressao = (tempo >= 70) and (abs(gols_casa - gols_fora) <= 1)
+
+            if alta_pressao_chutes or reta_final_pressao:
+                etapa = "1º Tempo" if status_curto == "1H" else "2º Tempo"
+                
                 msg_live = (
-                    f"🔥 **ALERTA PRESSÃO - 2º TEMPO ({tempo}')**\n\n"
+                    f"🔥 **ALERTA DE PRESSÃO EXTREMA ({tempo}')**\n\n"
                     f"🏆 **Liga:** {liga}\n"
                     f"⚔️ **Confronto:** {casa} {gols_casa} x {gols_fora} {fora}\n"
-                    f"⏱️ **Minuto:** {tempo}' (Segundo Tempo)\n\n"
-                    f"🎯 **Indicadores Detectados:**\n"
-                    f"⚽ **Pressão Final:** Jogo aberto em busca de resultado.\n"
-                    f"🚩 **Escanteios FT:** Tendência alta para Cantos Limite / Final do jogo.\n\n"
-                    f"💡 *Sugestão:* Over Gol nos minutos finais ou Cantos Limite."
+                    f"⏱️ **Minuto:** {tempo}' ({etapa})\n\n"
+                    f"📊 **Estatísticas ao Vivo:**\n"
+                    f"🎯 **Chutes no Gol:** {chutes_no_gol} | **Total Chutes:** {total_finalizacoes}\n"
+                    f"🚩 **Escanteios:** {escanteios}\n"
+                    f"🟨 **Cartões:** {cartoes_amarelos} Amarelos | {cartoes_vermelhos} Vermelhos\n\n"
+                    f"⚡ **Oportunidades Recomendadas:**\n"
+                    f"⚽ **Próximo Gol / Over Gol Limite** (Jogo muito movimentado)\n"
+                    f"🚩 **Escanteios Limite** (Pressão na área)\n"
+                    f"🟨 **Cartões** (Jogo faltoso/Reta final)\n\n"
+                    f"💡 *Entrar com gestão de banca (1% a 2%).*"
                 )
+                
                 await bot.send_message(chat_id=CHAT_ID, text=msg_live, parse_mode="Markdown")
+                ultimos_alertas_tempo[fixture_id] = tempo
                 alertas_enviados += 1
 
             if alertas_enviados >= 3:
@@ -143,13 +191,13 @@ async def monitorar_jogos_ao_vivo():
             await asyncio.sleep(1.5)
 
     except Exception as e:
-        print(f"Erro no Ao Vivo: {e}")
+        print(f"Erro no Ao Vivo com Estatísticas: {e}")
 
 async def main():
-    print("🚀 Bot iniciado no Render (Modo Web Service com Porta Ativa)!")
+    print("🚀 Bot iniciado no Render (Filtro Inteligente de Pressão e Estatísticas)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Atualizado!**\nServidor de checagem do Render ativado com sucesso.",
+        text="🤖 **Bot de Apostas Atualizado!**\nAgora analisando estatísticas em tempo real (chutes, cantos e pressão na reta final).",
         parse_mode="Markdown"
     )
     
