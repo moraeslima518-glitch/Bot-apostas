@@ -4,12 +4,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import requests
 
+# Variáveis de Ambiente do Render
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-# Endpoint público da ESPN (não precisa de API Key)
+# Endpoint da API da ESPN
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 
+# Servidor HTTP para validação do Render (evita erros 501 e mantém o bot ativo)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -17,14 +19,20 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is live!")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+
 def run_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
+# Envio de Alertas para o Telegram
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("[AVISO] Telegram não enviado: Faltam tokens de configuração.")
+        print("[AVISO] Telegram não configurado no Render.")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
@@ -33,11 +41,12 @@ def send_telegram(message):
     except Exception as e:
         print(f"[ERRO Telegram] {e}")
 
+# Leitura e Processamento dos Jogos
 def check_matches():
     try:
         response = requests.get(ESPN_URL, timeout=15)
         if response.status_code != 200:
-            print(f"[ERRO ESPN] Status: {response.status_code}")
+            print(f"[ERRO ESPN] Status Code: {response.status_code}")
             return
 
         data = response.json()
@@ -46,14 +55,13 @@ def check_matches():
         live_matches = []
         for event in events:
             status_type = event.get("status", {}).get("type", {}).get("name", "")
-            # Filtra apenas jogos que estão acontecendo no momento (in-game)
+            # Filtra partidas em andamento ou no intervalo
             if status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
                 live_matches.append(event)
 
-        print(f"[STATUS] Consulta realizada com sucesso. Jogos ao vivo encontrados: {len(live_matches)}")
+        print(f"[STATUS] Busca com sucesso. Jogos ao vivo: {len(live_matches)}")
 
         for match in live_matches:
-            competition = match.get("season", {}).get("slug", "Futebol")
             competitors = match.get("competitions", [{}])[0].get("competitors", [])
             
             home_team = "Casa"
@@ -76,18 +84,23 @@ def check_matches():
                 f"⚔️ {home_team} {home_score} x {away_score} {away_team}\n"
                 f"⏱️ Tempo: {clock}"
             )
-            print(f"Alerta gerado: {home_team} x {away_team}")
+            print(f"Alerta: {home_team} x {away_team}")
+            
+            # Para enviar todas as partidas ativas ao Telegram, remova a tralha (#) da linha abaixo:
             # send_telegram(msg)
 
     except Exception as e:
-        print(f"[EXCEÇÃO] Falha ao consultar API: {e}")
+        print(f"[EXCEÇÃO] Falha na requisição: {e}")
 
+# Loop principal de checagem
 def bot_loop():
-    print("[INÍCIO] Monitoramento ESPN iniciado sem necessidade de chaves.")
+    print("[INÍCIO] Monitoramento de partidas iniciado.")
     while True:
         check_matches()
-        time.sleep(120)  # Checa a cada 2 minutos
+        time.sleep(120)  # Executa a cada 2 minutos
 
 if __name__ == "__main__":
+    # Inicia o servidor HTTP em background
     threading.Thread(target=run_server, daemon=True).start()
+    # Executa a verificação dos jogos
     bot_loop()
