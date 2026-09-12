@@ -11,7 +11,6 @@ import hashlib
 # ==========================================
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 
 # Dicionário para armazenar APENAS os jogos que você escolheu monitorar
 tracked_matches = {}
@@ -25,7 +24,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst Pro V14 - Full Flexible Search is Live!")
+        self.wfile.write(b"Bot Analyst Pro V15 - Date & League Fixed!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -103,25 +102,23 @@ def generate_prematch_analysis(home_team, away_team, league_name):
     return analysis
 
 # ==========================================
-# ADICIONAR JOGO À LISTA (BUSCA FLEXÍVEL)
+# BUSCA ROBUSTA DE JOGOS (COM SUPORTE AO BRASILEIRÃO)
 # ==========================================
-def request_match_analysis(team_query):
+def search_events_from_url(url, query_clean):
     try:
-        response = requests.get(ESPN_URL, timeout=15)
+        response = requests.get(url, timeout=15)
         if response.status_code != 200:
-            send_telegram("⚠️ Erro ao acessar a API de jogos no momento.")
-            return
-
+            return None
         data = response.json()
         events = data.get("events", [])
         
-        found = False
-        query_clean = team_query.lower().strip()
-
         for event in events:
             match_id = event.get("id")
             competitions = event.get("competitions", [{}])
-            league_name = competitions[0].get("tournament", {}).get("name", "Futebol Internacional")
+            league_name = competitions[0].get("tournament", {}).get("name", "Futebol")
+            if league_name == "Futebol" or not league_name:
+                league_name = data.get("leagues", [{}])[0].get("name", "Campeonato de Futebol")
+                
             competitors = competitions[0].get("competitors", [])
             
             home_team, away_team = "Casa", "Visitante"
@@ -135,34 +132,59 @@ def request_match_analysis(team_query):
                     away_team = team.get("team", {}).get("displayName", "Visitante")
                     short_away = team.get("team", {}).get("shortDisplayName", "")
             
-            # Busca flexível em todos os nomes do confronto
             full_match_text = f"{home_team} {away_team} {short_home} {short_away}".lower()
             
             if query_clean in full_match_text:
-                found = True
-                
-                if match_id in tracked_matches:
-                    send_telegram(f"ℹ️ O jogo <b>{home_team} x {away_team}</b> já está na sua lista de monitoramento ativo!")
-                    return
-                
-                tracked_matches[match_id] = {
+                return {
+                    "match_id": match_id,
                     "home": home_team,
                     "away": away_team,
-                    "league": league_name,
-                    "alerts_sent": ["Pré-Jogo / Mercado Geral"],
-                    "notified_ht_goal": False,
-                    "notified_ht_corner": False,
-                    "notified_ft_goal": False,
-                    "notified_cards": False,
-                    "result_sent": False
+                    "league": league_name
                 }
-                
-                msg = generate_prematch_analysis(home_team, away_team, league_name)
-                send_telegram(msg)
-                break
-                
-        if not found:
-            send_telegram(f"❌ Nenhum jogo encontrado para: <b>{team_query.title()}</b>. Verifique se o nome está correto.")
+    except Exception as e:
+        print(f"[ERRO BUSCA URL] {e}")
+    return None
+
+def request_match_analysis(team_query):
+    try:
+        today_str = datetime.now().strftime("%Y%m%d")
+        query_clean = team_query.lower().strip()
+        
+        # 1. Tenta na URL geral com a data de hoje forçada
+        general_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={today_str}"
+        found_game = search_events_from_url(general_url, query_clean)
+        
+        # 2. Se não achar, tenta especificamente na API do Brasileirão (bra.1)
+        if not found_game:
+            br_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/scoreboard?dates={today_str}"
+            found_game = search_events_from_url(br_url, query_clean)
+            
+        if found_game:
+            match_id = found_game["match_id"]
+            home_team = found_game["home"]
+            away_team = found_game["away"]
+            league_name = found_game["league"]
+            
+            if match_id in tracked_matches:
+                send_telegram(f"ℹ️ O jogo <b>{home_team} x {away_team}</b> já está na sua lista de monitoramento ativo!")
+                return
+            
+            tracked_matches[match_id] = {
+                "home": home_team,
+                "away": away_team,
+                "league": league_name,
+                "alerts_sent": ["Pré-Jogo / Mercado Geral"],
+                "notified_ht_goal": False,
+                "notified_ht_corner": False,
+                "notified_ft_goal": False,
+                "notified_cards": False,
+                "result_sent": False
+            }
+            
+            msg = generate_prematch_analysis(home_team, away_team, league_name)
+            send_telegram(msg)
+        else:
+            send_telegram(f"❌ Nenhum jogo encontrado hoje para: <b>{team_query.title()}</b>. Verifique se o nome está correto.")
             
     except Exception as e:
         print(f"[ERRO SOLICITAÇÃO] {e}")
@@ -229,7 +251,8 @@ def monitor_tracked_matches():
         return
 
     try:
-        response = requests.get(ESPN_URL, timeout=15)
+        today_str = datetime.now().strftime("%Y%m%d")
+        response = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={today_str}", timeout=15)
         if response.status_code != 200:
             return
 
@@ -346,7 +369,7 @@ def monitor_tracked_matches():
         print(f"[EXCEÇÃO NO MONITORAMENTO] {e}")
 
 # ==========================================
-# INICIALIZAÇÃO DO BOT
+# /INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
     print("[BOT INICIADO] Pronto para receber comandos e monitorar sob demanda.")
