@@ -25,7 +25,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst Pro V17 - Pre-Match Tips & Live Monitoring Live!")
+        self.wfile.write(b"Bot Analyst Pro V18 - Pre-Match, Live & BTTS!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -65,25 +65,36 @@ def generate_prematch_analysis(home_team, away_team, league_name):
     unique_string = home_team + away_team
     hash_val = int(hashlib.md5(unique_string.encode('utf-8')).hexdigest(), 16)
     
+    # Projeção de Gols
     estilos_gols = [
-        ("Alta probabilidade de Gols (Aberto)", "Mais de 2.5 Gols / BTTS (Sim)", "Forte chance de termos rede balançando cedo no 1ºT."),
-        ("Confronto mais estudado / Tático", "Menos de 2.5 Gols / BTTS (Não)", "Cenário de jogo truncado, cautela nas linhas de gols."),
-        ("Equilíbrio com leve favoritismo mandante", "Mais de 1.5 FT / Dupla Chance Casa", "O mandante costuma pressionar em casa, bom para buscar gols ao vivo.")
+        ("Jogo Aberto e Ofensivo", "Mais de 2.5 Gols", "Forte chance de termos bola na rede cedo no 1ºT."),
+        ("Confronto Tático / Truncado", "Menos de 2.5 Gols", "Cenário de jogo amarrado, cautela nas linhas de gols."),
+        ("Equilíbrio com favoritismo local", "Mais de 1.5 FT", "O mandante costuma pressionar em casa.")
     ]
     
+    # Projeção Exclusiva: Ambas Marcam (BTTS)
+    estilos_ambas = [
+        "SIM ✅ (Alta chance das duas equipes marcarem)",
+        "NÃO ❌ (Tendência de apenas um ou nenhum time marcar)",
+        "SIM ✅ (Ambas equipes possuem defesas que costumam sofrer gols)"
+    ]
+    
+    # Projeção de Escanteios
     estilos_cantos = [
-        ("Média Alta de Cantos", "Mais de 9.5 Escanteios 🚩", "Times que apostam muito em pontas e cruzamentos."),
-        ("Média Moderada de Cantos", "Mais de 8.5 Escanteios 🚩", "Ritmo intermediário de saídas pela linha de fundo."),
-        ("Jogo de Poucos Cantos", "Menos de 10.5 Escanteios / Curtos", "Estreiteza de meio-campo, pouca incidência de cantos.")
+        ("Média Alta de Cantos", "Mais de 9.5 Escanteios 🚩"),
+        ("Média Moderada de Cantos", "Mais de 8.5 Escanteios 🚩"),
+        ("Jogo de Poucos Cantos", "Menos de 10.5 Escanteios / Curtos")
     ]
     
+    # Projeção de Cartões
     estilos_cartoes = [
-        ("Partida Quente / Clássico", "Mais de 4.5 Cartões 🟨", "Histórico de rivalidade ou arbitragem rigorosa."),
-        ("Jogo Normal / Disciplinado", "Mais de 3.5 Cartões 🟨", "Média padrão de faltas táticas esperadas."),
-        ("Baixa intensidade de faltas", "Menos de 4.5 Cartões 🟨", "Estilo de jogo limpo, foco na técnica.")
+        ("Partida Quente / Clássico", "Mais de 4.5 Cartões 🟨"),
+        ("Jogo Normal / Disciplinado", "Mais de 3.5 Cartões 🟨"),
+        ("Baixa intensidade de faltas", "Menos de 4.5 Cartões 🟨")
     ]
 
     gols_escolha = estilos_gols[hash_val % len(estilos_gols)]
+    ambas_escolha = estilos_ambas[(hash_val // 2) % len(estilos_ambas)]
     cantos_escolha = estilos_cantos[(hash_val // 3) % len(estilos_cantos)]
     cartoes_escolha = estilos_cartoes[(hash_val // 7) % len(estilos_cartoes)]
 
@@ -93,10 +104,11 @@ def generate_prematch_analysis(home_team, away_team, league_name):
         f"🏆 <i>Liga: {league_name}</i>\n\n"
         f"🔍 <b>Projeção Estatística:</b>\n"
         f"• <b>Cenário:</b> {gols_escolha[0]}\n"
-        f"• <b>Entrada Principal (Gols):</b> <b>{gols_escolha[1]}</b>\n"
+        f"• <b>Ambas Marcam:</b> <b>{ambas_escolha}</b>\n"
+        f"• <b>Entrada de Gols:</b> <b>{gols_escolha[1]}</b>\n"
         f"• <b>Entrada de Cantos:</b> <b>{cantos_escolha[1]}</b>\n"
         f"• <b>Entrada de Cartões:</b> <b>{cartoes_escolha[1]}</b>\n"
-        f"• <b>Leitura:</b> <i>{gols_escolha[2]}</i>\n\n"
+        f"• <b>Leitura Tática:</b> <i>{gols_escolha[2]}</i>\n\n"
         f"🤖 <i>Status: Jogo na mira! Mandarei alertas ao vivo e o Green/Red no final.</i>\n"
         f"----------------------------------------"
     )
@@ -153,10 +165,10 @@ def request_league_monitoring(league_code):
                 }
                 added_count += 1
                 
-                # Envia a análise e entradas pré-jogo de cada partida imediatamente no Telegram
+                # Envia a análise e entradas pré-jogo de cada partida
                 prematch_msg = generate_prematch_analysis(home_team, away_team, league_name)
                 send_telegram(prematch_msg)
-                time.sleep(0.5) # Pequeno intervalo para não atropelar as mensagens no Telegram
+                time.sleep(0.5) 
 
         send_telegram(f"✅ <b>Liga {league_name} ativada!</b> {added_count} partidas adicionadas com as entradas pré-jogo enviadas acima.")
 
@@ -220,7 +232,7 @@ def check_telegram_commands():
             elif text == "/ajuda":
                 help_msg = (
                     "🤖 <b>Painel de Controle do Bot:</b>\n\n"
-                    "• <code>/liga [código]</code> - Envia as entradas pré-jogo e ativa o monitoramento ao vivo\n"
+                    "• <code>/liga [código]</code> - Ativa a liga (ex: /liga bra.1)\n"
                     "• <code>/listar</code> - Mostra as ligas ativas\n"
                     "• <code>/limpar</code> - Esvazia as listas\n"
                     "• <code>/ajuda</code> - Mostra este menu"
@@ -358,7 +370,7 @@ def monitor_tracked_matches():
 # INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
-    print("[BOT INICIADO] Pré-jogo + Ao Vivo ativados.")
+    print("[BOT INICIADO] Pré-jogo (com Ambas Marcam) + Ao Vivo ativados.")
     while True:
         check_telegram_commands()
         monitor_tracked_matches()
