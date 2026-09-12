@@ -45,7 +45,7 @@ def enviar_mensagem_telegram(texto):
         return False
 
 def obter_jogos_do_dia():
-    """Busca todas as partidas do dia atual na API-Football."""
+    """Busca partidas do dia e envia o resultado exato da API via Telegram se houver erro."""
     hoje = datetime.now(FUSO_BR).strftime("%Y-%m-%d")
     url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
     
@@ -60,14 +60,25 @@ def obter_jogos_do_dia():
 
     try:
         res = requests.get(url, headers=headers, params=params, timeout=15)
-        if res.status_code == 200:
-            dados = res.json()
-            return dados.get("response", [])
-        else:
-            print(f"Erro na API Football: Status {res.status_code}")
+        dados = res.json()
+        
+        # Se a API trouxer algum erro registrado no JSON de resposta, envia no Telegram
+        if "errors" in dados and dados["errors"]:
+            erro_msg = f"⚠️ *Erro retornado pela API-Football:*\n`{dados['errors']}`"
+            enviar_mensagem_telegram(erro_msg)
             return []
+
+        # Se a lista de jogos vier vazia, envia a contagem oficial informada pela API
+        jogos = dados.get("response", [])
+        if not jogos:
+            total_resultados = dados.get("results", 0)
+            enviar_mensagem_telegram(f"⚠️ *API respondeu sem jogos.* Total de resultados: {total_resultados}")
+            return []
+
+        return jogos
+
     except Exception as e:
-        print(f"Exceção ao buscar jogos: {e}")
+        enviar_mensagem_telegram(f"⚠️ *Exceção na requisição:* `{e}`")
         return []
 
 def enviar_resumo_diario():
@@ -75,12 +86,10 @@ def enviar_resumo_diario():
     jogos = obter_jogos_do_dia()
     
     if not jogos:
-        enviar_mensagem_telegram("⚽ *Resumo do Dia*\n\nNenhum jogo encontrado para a data de hoje.")
         return
 
     mensagem = f"⚽ *Jogos do Dia ({datetime.now(FUSO_BR).strftime('%d/%m/%Y')})*\n\n"
     
-    # Exibe os primeiros 20 jogos do dia
     for item in jogos[:20]:
         liga = item["league"]["name"]
         time_casa = item["teams"]["home"]["name"]
@@ -100,7 +109,7 @@ def enviar_resumo_diario():
 
 def job_monitoramento():
     agora = datetime.now(FUSO_BR).strftime("%H:%M:%S")
-    print(f"[{agora}] Checando alertas pré-jogo e ao vivo...")
+    print(f"[{agora}] Checando alertas...")
 
 # Inicia o servidor HTTP numa thread em segundo plano
 thread_web = threading.Thread(target=iniciar_servidor_web, daemon=True)
@@ -116,4 +125,4 @@ schedule.every().day.at("07:00").do(enviar_resumo_diario)
 while True:
     schedule.run_pending()
     job_monitoramento()
-    time.sleep(300) # Checa a cada 5 minutos
+    time.sleep(300)
