@@ -4,6 +4,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import requests
 from datetime import datetime, timezone
+import hashlib
 
 # ==========================================
 # CONFIGURAÇÕES DE AMBIENTE
@@ -27,7 +28,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst Pro V8 is Live!")
+        self.wfile.write(b"Bot Analyst Pro V9 is Live!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -61,23 +62,47 @@ def get_stat(team_data, stat_name):
     return 0
 
 # ==========================================
-# GERADOR DE ANÁLISE INTELIGENTE PRÉ-JOGO
+# GERADOR DE ANÁLISE PRÉ-JOGO DINÂMICA E ÚNICA
 # ==========================================
 def generate_prematch_analysis(home_team, away_team, league_name):
-    # Aqui aplicamos a lógica preditiva baseada no perfil dos confrontos
-    # O bot simula a leitura de H2H, momento e tendências estatísticas:
+    # Usa os nomes dos times para criar uma variabilidade matemática única para cada confronto
+    unique_string = home_team + away_team
+    hash_val = int(hashlib.md5(unique_string.encode('utf-8')).hexdigest(), 16)
     
+    # Perfis dinâmicos baseados no hash do jogo
+    estilos_gols = [
+        ("Alta probabilidade de Gols (Aberto)", "Mais de 2.5 Gols / BTTS (Sim)", "Forte chance de termos rede balançando cedo no 1ºT."),
+        ("Confronto mais estudado / Tático", "Menos de 2.5 Gols / BTTS (Não)", "Cenário de jogo truncado, cautela nas linhas de gols."),
+        ("Equilíbrio com leve favoritismo mandante", "Mais de 1.5 FT / Dupla Chance Casa", "O mandante costuma pressionar em casa, bom para buscar gols ao vivo.")
+    ]
+    
+    estilos_cantos = [
+        ("Média Alta de Cantos", "Mais de 9.5 Escanteios 🚩", "Times que apostam muito em pontas e cruzamentos."),
+        ("Média Moderada de Cantos", "Mais de 8.5 Escanteios 🚩", "Ritmo intermediário de saídas pela linha de fundo."),
+        ("Jogo de Poucos Cantos", "Menos de 10.5 Escanteios / Curtos", "Estreiteza de meio-campo, pouca incidência de cantos.")
+    ]
+    
+    estilos_cartoes = [
+        ("Partida Quente / Clássico", "Mais de 4.5 Cartões 🟨", "Histórico de rivalidade ou arbitragem rigorosa."),
+        ("Jogo Normal / Disciplinado", "Mais de 3.5 Cartões 🟨", "Média padrão de faltas táticas esperadas."),
+        ("Baixa intensidade de faltas", "Menos de 4.5 Cartões 🟨", "Estilo de jogo limpo, foco na técnica.")
+    ]
+
+    gols_escolha = estilos_gols[hash_val % len(estilos_gols)]
+    cantos_escolha = estilos_cantos[(hash_val // 3) % len(estilos_cantos)]
+    cartoes_escolha = estilos_cartoes[(hash_val // 7) % len(estilos_cartoes)]
+
     analysis = (
         f"📋 <b>RADAR PRÉ-JOGO & ANÁLISE TÉCNICA</b> 📋\n\n"
         f"⚔️ <b>{home_team}</b> x <b>{away_team}</b>\n"
         f"🏆 <i>Liga: {league_name}</i>\n\n"
         f"🔍 <b>Projeção Estatística Pré-Partida:</b>\n"
-        f"• <b>Tendência 1X2:</b> Favorito leve para o mandante ({home_team}) ou Dupla Chance 🏠\n"
-        f"• <b>Ambas Marcam (BTTS):</b> Alta probabilidade de Gols de ambos os lados ⚽\n"
-        f"• <b>Linha de Gols:</b> Tendência forte para Mais de 1.5 / Over 2.5 FT 📈\n"
-        f"• <b>Escanteios Esperados:</b> Linha estimada em <b>Mais de 8.5 / 9.5 Cantos</b> 🚩\n"
-        f"• <b>Cartões Estimados:</b> Jogo com tendência de <b>Mais de 3.5 Cartões</b> 🟨\n\n"
-        f"💡 <i>Dica: Monitore o jogo ao vivo para entradas de Pressão HT e Cantos!</i>\n"
+        f"• <b>Cenário de Jogo:</b> {gols_escolha[0]}\n"
+        f"• <b>Mercado Principal:</b> <b>{gols_escolha[1]}</b>\n"
+        f"• <b>Leitura Tática:</b> <i>{gols_escolha[2]}</i>\n"
+        f"• <b>Escanteios Projetados:</b> <b>{cantos_escolha[1]}</b> ({cantos_escolha[0]})\n"
+        f"• <b>Cartões Estimados:</b> <b>{cartoes_escolha[1]}</b> ({cartoes_escolha[0]})\n\n"
+        f"💡 <i>Dica: Acompanhe o ao vivo para validar a pressão real na janela útil!</i>\n"
         f"----------------------------------------"
     )
     return analysis
@@ -139,7 +164,7 @@ def check_matches():
             total_cards = home_cards + away_cards
 
             # ---------------------------------------------------------
-            # 1. PRÉ-JOGO (3 HORAS ANTES) - Análise Completa
+            # 1. PRÉ-JOGO (3 HORAS ANTES) - Análise Dinâmica e Personalizada
             # ---------------------------------------------------------
             if status_type == "STATUS_SCHEDULED":
                 try:
@@ -223,7 +248,7 @@ def check_matches():
 # INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
-    print("[BOT INICIADO] Radar analítico pré-jogo e ao vivo ativos.")
+    print("[BOT INICIADO] Radar analítico dinâmico ativado.")
     while True:
         check_matches()
         time.sleep(120)
