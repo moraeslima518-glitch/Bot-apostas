@@ -1,113 +1,93 @@
 import os
 import time
-import requests
-import schedule
-import pytz
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
+import threading
+import requests
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
-FUSO_BR = pytz.timezone("America/Sao_Paulo")
+# Endpoint público da ESPN (não precisa de API Key)
+ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot de Apostas Ativo!")
-        
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
+        self.wfile.write(b"Bot is live!")
 
-def iniciar_servidor_web():
-    port = int(os.getenv("PORT", 8080))
+def run_server():
+    port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
-def enviar_mensagem_telegram(texto):
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("[AVISO] Telegram não enviado: Faltam tokens de configuração.")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": texto, "parse_mode": "Markdown"}
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"Erro Telegram: {e}")
+        print(f"[ERRO Telegram] {e}")
 
-def obter_jogos():
-    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-    headers = {
-        "X-RapidAPI-Key": RAPIDAPI_KEY,
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
-    }
-    
-    # 1. Busca TODAS as partidas ao vivo do mundo nesse exato instante
+def check_matches():
     try:
-        res = requests.get(url, headers=headers, params={"live": "all"}, timeout=15)
-        dados = res.json()
+        response = requests.get(ESPN_URL, timeout=15)
+        if response.status_code != 200:
+            print(f"[ERRO ESPN] Status: {response.status_code}")
+            return
+
+        data = response.json()
+        events = data.get("events", [])
         
-        if "errors" in dados and dados["errors"]:
-            enviar_mensagem_telegram(f"⚠️ *Erro na API:* `{dados['errors']}`")
-            return []
+        live_matches = []
+        for event in events:
+            status_type = event.get("status", {}).get("type", {}).get("name", "")
+            # Filtra apenas jogos que estão acontecendo no momento (in-game)
+            if status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
+                live_matches.append(event)
+
+        print(f"[STATUS] Consulta realizada com sucesso. Jogos ao vivo encontrados: {len(live_matches)}")
+
+        for match in live_matches:
+            competition = match.get("season", {}).get("slug", "Futebol")
+            competitors = match.get("competitions", [{}])[0].get("competitors", [])
             
-        jogos = dados.get("response", [])
-        if jogos:
-            return jogos
+            home_team = "Casa"
+            away_team = "Visitante"
+            home_score = "0"
+            away_score = "0"
+
+            for team in competitors:
+                if team.get("homeAway") == "home":
+                    home_team = team.get("team", {}).get("displayName", "Casa")
+                    home_score = team.get("score", "0")
+                else:
+                    away_team = team.get("team", {}).get("displayName", "Visitante")
+                    away_score = team.get("score", "0")
+
+            clock = match.get("status", {}).get("displayClock", "0'")
+
+            msg = (
+                f"⚽ <b>Jogo Ao Vivo!</b>\n"
+                f"⚔️ {home_team} {home_score} x {away_score} {away_team}\n"
+                f"⏱️ Tempo: {clock}"
+            )
+            print(f"Alerta gerado: {home_team} x {away_team}")
+            # send_telegram(msg)
+
     except Exception as e:
-        print(f"Erro busca ao vivo: {e}")
+        print(f"[EXCEÇÃO] Falha ao consultar API: {e}")
 
-    # 2. Se não houver jogos ao vivo, busca os jogos da data de hoje
-    hoje = datetime.now(FUSO_BR).strftime("%Y-%m-%d")
-    try:
-        res = requests.get(url, headers=headers, params={"date": hoje}, timeout=15)
-        dados = res.json()
-        
-        if "errors" in dados and dados["errors"]:
-            enviar_mensagem_telegram(f"⚠️ *Erro na API:* `{dados['errors']}`")
-            return []
-            
-        return dados.get("response", [])
-    except Exception as e:
-        print(f"Erro busca por data: {e}")
-        return []
+def bot_loop():
+    print("[INÍCIO] Monitoramento ESPN iniciado sem necessidade de chaves.")
+    while True:
+        check_matches()
+        time.sleep(120)  # Checa a cada 2 minutos
 
-def enviar_resumo():
-    jogos = obter_jogos()
-    
-    if not jogos:
-        enviar_mensagem_telegram("⚽ *Central de Jogos*\n\nNenhuma partida ao vivo ou agendada encontrada no momento.")
-        return
-
-    mensagem = f"⚽ *Partidas Encontradas ({datetime.now(FUSO_BR).strftime('%H:%M')})*\n\n"
-    
-    for item in jogos[:15]:
-        liga = item["league"]["name"]
-        pais = item["league"]["country"]
-        time_casa = item["teams"]["home"]["name"]
-        time_fora = item["teams"]["away"]["name"]
-        
-        gols_casa = item["goals"]["home"] if item["goals"]["home"] is not None else 0
-        gols_fora = item["goals"]["away"] if item["goals"]["away"] is not None else 0
-        status = item["fixture"]["status"]["short"]
-        
-        mensagem += f"🌎 *{pais} - {liga}*\n"
-        mensagem += f"⚽ {time_casa} {gols_casa} x {gols_fora} {time_fora} [{status}]\n\n"
-
-    if len(jogos) > 15:
-        mensagem += f"_... e mais {len(jogos) - 15} partidas rodando no mundo._"
-
-    enviar_mensagem_telegram(mensagem)
-
-# Iniciar thread do servidor HTTP
-thread_web = threading.Thread(target=iniciar_servidor_web, daemon=True)
-thread_web.start()
-
-# Teste imediato
-enviar_resumo()
-
-# Loop do bot
-while True:
-    time.sleep(60)
+if __name__ == "__main__":
+    threading.Thread(target=run_server, daemon=True).start()
+    bot_loop()
