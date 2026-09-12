@@ -1,37 +1,19 @@
 import os
 import time
-import threading
 import requests
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta
+import schedule
+import pytz
+from datetime import datetime
 
-# Configurações das Variáveis de Ambiente no Render
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
-RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY")
+# Credenciais do ambiente (definidas no Render)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
-# Servidor HTTP simples nativo do Python para responder ao Render e UptimeRobot
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(b"Bot de Apostas Online!")
-
-    def log_message(self, format, *args):
-        return  # Desativa logs HTTP para nao poluir o console
-
-def rodar_servidor_web():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    print(f"Servidor Web ativo na porta {port}")
-    server.serve_forever()
+FUSO_BR = pytz.timezone("America/Sao_Paulo")
 
 def enviar_mensagem_telegram(texto):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Erro: TELEGRAM_TOKEN ou CHAT_ID ausente.")
-        return
-        
+    """Envia mensagem para o Telegram via API."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -39,65 +21,80 @@ def enviar_mensagem_telegram(texto):
         "parse_mode": "Markdown"
     }
     try:
-        requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
     except Exception as e:
-        print(f"Erro ao enviar Telegram: {e}")
+        print(f"Erro ao enviar mensagem Telegram: {e}")
+        return False
 
-def enviar_resumo_jogos_dia():
-    if not RAPIDAPI_KEY:
-        print("Erro: RAPIDAPI_KEY ausente.")
+def obter_jogos_do_dia():
+    """Busca todas as partidas do dia atual na API-Football."""
+    hoje = datetime.now(FUSO_BR).strftime("%Y-%m-%d")
+    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
+    
+    headers = {
+        "X-RapidAPI-Key": RAPIDAPI_KEY,
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+    }
+    params = {
+        "date": hoje,
+        "timezone": "America/Sao_Paulo"
+    }
+
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=15)
+        if res.status_code == 200:
+            dados = res.json()
+            return dados.get("response", [])
+        else:
+            print(f"Erro na API Football: Status {res.status_code}")
+            return []
+    except Exception as e:
+        print(f"Exceção ao buscar jogos: {e}")
+        return []
+
+def enviar_resumo_diario():
+    """Formata e dispara o resumo diário de partidas."""
+    jogos = obter_jogos_do_dia()
+    
+    if not jogos:
+        enviar_mensagem_telegram("⚽ *Resumo do Dia*\n\nNenhum jogo encontrado para a data de hoje.")
         return
 
-    hoje = datetime.now().strftime("%Y-%m-%d")
-    headers = {
-        'x-rapidapi-host': "v3.football.api-sports.io",
-        'x-rapidapi-key': RAPIDAPI_KEY
-    }
-    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
+    mensagem = f"⚽ *Jogos do Dia ({datetime.now(FUSO_BR).strftime('%d/%m/%Y')})*\n\n"
     
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        dados = response.json()
-        partidas = dados.get('response', [])
+    # Exibe os primeiros 20 jogos do dia organizados
+    for item in jogos[:20]:
+        liga = item["league"]["name"]
+        time_casa = item["teams"]["home"]["name"]
+        time_fora = item["teams"]["away"]["name"]
         
-        jogos_filtrados = []
+        # Pega a hora formatada no fuso de SP
+        data_jogo = item["fixture"]["date"]
+        hora_formatada = datetime.fromisoformat(data_jogo).astimezone(FUSO_BR).strftime("%H:%M")
+        status = item["fixture"]["status"]["short"]
+        
+        mensagem += f"🏆 *{liga}*\n"
+        mensagem += f"⏰ {hora_formatada} | {time_casa} x {time_fora} (Status: {status})\n\n"
 
-        for partida in partidas:
-            data_str = partida['fixture']['date']
-            data_utc = datetime.strptime(data_str, "%Y-%m-%dT%H:%M:%S%z")
-            hora_br = data_utc - timedelta(hours=3)
-            
-            if hora_br.hour >= 7:
-                time_casa = partida['teams']['home']['name']
-                time_fora = partida['teams']['away']['name']
-                nome_liga = partida['league']['name']
-                horario_formatado = hora_br.strftime("%H:%M")
-                
-                jogos_filtrados.append(f"⚽ *{horario_formatado}* - {time_casa} x {time_fora} _({nome_liga})_")
+    if len(jogos) > 20:
+        mensagem += f"_... e mais {len(jogos) - 20} partidas agendadas para hoje._"
 
-        if jogos_filtrados:
-            mensagem = "📋 *RESUMO DE JOGOS DO DIA (A partir das 07:00)* 📋\n\n" + "\n".join(jogos_filtrados[:30])
-        else:
-            mensagem = "⚠️ Nenhum jogo encontrado para hoje a partir das 07:00."
+    enviar_mensagem_telegram(mensagem)
 
-        enviar_mensagem_telegram(mensagem)
-        print("Resumo enviado com sucesso para o Telegram!")
+def job_monitoramento():
+    """Verificação em loop de partidas e alertas."""
+    agora = datetime.now(FUSO_BR).strftime("%H:%M:%S")
+    print(f"[{agora}] Checando alertas pré-jogo e ao vivo...")
 
-    except Exception as e:
-        print(f"Erro na requisição da API: {e}")
+# Executa o resumo imediatamente na inicialização
+enviar_resumo_diario()
 
-def loop_bot():
-    time.sleep(3)  # Aguarda 3 segundos
-    enviar_resumo_jogos_dia()
-    
-    while True:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Checando alertas pré-jogo e ao vivo...")
-        time.sleep(300)
+# Agendamento diário para as 07:00 da manhã
+schedule.every().day.at("07:00").do(enviar_resumo_diario)
 
-if __name__ == "__main__":
-    # 1. Inicia o servidor HTTP nativo em uma thread separada
-    t_web = threading.Thread(target=rodar_servidor_web, daemon=True)
-    t_web.start()
-    
-    # 2. Inicia o loop do bot
-    loop_bot()
+# Loop principal de execução do serviço no Render
+while True:
+    schedule.run_pending()
+    job_monitoramento()
+    time.sleep(300) # Checa a cada 5 minutos
