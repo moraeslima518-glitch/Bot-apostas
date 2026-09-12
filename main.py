@@ -11,7 +11,7 @@ CHAT_ID = os.environ.get("CHAT_ID")
 # Endpoint da API da ESPN
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 
-# Servidor HTTP para validação do Render (evita erros 501 e mantém o bot ativo)
+# Servidor HTTP para validação do Render (trata GET e HEAD para evitar erros no log)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -32,7 +32,7 @@ def run_server():
 # Envio de Alertas para o Telegram
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("[AVISO] Telegram não configurado no Render.")
+        print("[AVISO] Telegram não configurado no Render (verifique TELEGRAM_TOKEN e CHAT_ID).")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
@@ -59,7 +59,7 @@ def check_matches():
             if status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
                 live_matches.append(event)
 
-        print(f"[STATUS] Busca com sucesso. Jogos ao vivo: {len(live_matches)}")
+        print(f"[STATUS] Busca realizada com sucesso. Jogos ao vivo: {len(live_matches)}")
 
         for match in live_matches:
             competitors = match.get("competitions", [{}])[0].get("competitors", [])
@@ -80,14 +80,14 @@ def check_matches():
             clock = match.get("status", {}).get("displayClock", "0'")
 
             msg = (
-                f"⚽ <b>Jogo Ao Vivo!</b>\n"
-                f"⚔️ {home_team} {home_score} x {away_score} {away_team}\n"
+                f"⚽ <b>Jogo Ao Vivo!</b>\n\n"
+                f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
                 f"⏱️ Tempo: {clock}"
             )
-            print(f"Alerta: {home_team} x {away_team}")
+            print(f"Notificando partida: {home_team} x {away_team}")
             
-            # Para enviar todas as partidas ativas ao Telegram, remova a tralha (#) da linha abaixo:
-            # send_telegram(msg)
+            # Envio direto para o Telegram ativado
+            send_telegram(msg)
 
     except Exception as e:
         print(f"[EXCEÇÃO] Falha na requisição: {e}")
