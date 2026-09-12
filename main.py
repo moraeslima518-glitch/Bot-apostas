@@ -13,14 +13,9 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 
-# Memórias individuais para evitar repetições
-notified_prematch_batch = set()
-notified_ht_goals = set()
-notified_ht_corners = set()
-notified_cards = set()
-notified_ft_goals = set()
-matches_with_alerts = {}  # Guarda quais alertas foram disparados em cada jogo para conferir no final
-notified_results = set()  # Evita mandar o resultado final duas vezes
+# Dicionário para armazenar APENAS os jogos que você escolheu monitorar
+tracked_matches = {}
+last_telegram_update_id = 0
 
 # ==========================================
 # SERVIDOR HTTP (MANTÉM O RENDER ONLINE)
@@ -30,7 +25,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst Pro V10 with Results is Live!")
+        self.wfile.write(b"Bot Analyst Pro V13 - On-Demand Tracking is Live!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -93,28 +88,28 @@ def generate_prematch_analysis(home_team, away_team, league_name):
     cartoes_escolha = estilos_cartoes[(hash_val // 7) % len(estilos_cartoes)]
 
     analysis = (
-        f"📋 <b>RADAR PRÉ-JOGO & ANÁLISE TÉCNICA</b> 📋\n\n"
+        f"🎯 <b>ANÁLISE SOLICITADA & MONITORAMENTO ATIVO</b> 🎯\n\n"
         f"⚔️ <b>{home_team}</b> x <b>{away_team}</b>\n"
         f"🏆 <i>Liga: {league_name}</i>\n\n"
-        f"🔍 <b>Projeção Estatística Pré-Partida:</b>\n"
+        f"🔍 <b>Projeção Estatística:</b>\n"
         f"• <b>Cenário de Jogo:</b> {gols_escolha[0]}\n"
         f"• <b>Mercado Principal:</b> <b>{gols_escolha[1]}</b>\n"
         f"• <b>Leitura Tática:</b> <i>{gols_escolha[2]}</i>\n"
         f"• <b>Escanteios Projetados:</b> <b>{cantos_escolha[1]}</b> ({cantos_escolha[0]})\n"
         f"• <b>Cartões Estimados:</b> <b>{cartoes_escolha[1]}</b> ({cartoes_escolha[0]})\n\n"
-        f"💡 <i>Dica: Acompanhe o ao vivo para validar a pressão real na janela útil!</i>\n"
+        f"🤖 <i>Status: Jogo adicionado à sua lista. O bot vai te avisar do ao vivo e do Green/Red!</i>\n"
         f"----------------------------------------"
     )
     return analysis
 
 # ==========================================
-# LÓGICA PRINCIPAL COM FILTRO DO DIA E GREEN/RED
+# ADICIONAR JOGO À LISTA DE MONITORAMENTO VIA COMANDO
 # ==========================================
-def check_matches():
-    global notified_prematch_batch, notified_ht_goals, notified_ht_corners, notified_cards, notified_ft_goals, matches_with_alerts, notified_results
+def request_match_analysis(team_query):
     try:
         response = requests.get(ESPN_URL, timeout=15)
         if response.status_code != 200:
+            send_telegram("⚠️ Erro ao acessar a API de jogos no momento.")
             return
 
         data = response.json()
@@ -122,97 +117,177 @@ def check_matches():
         now = datetime.now(timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
         
+        found = False
         for event in events:
             date_str = event.get("date", "")
-            
-            # FILTRO DE SEGURANÇA: Apenas jogos do dia de hoje
             if not date_str.startswith(today_str):
                 continue
-
+                
             match_id = event.get("id")
-            status = event.get("status", {})
-            status_type = status.get("type", {}).get("name", "")
-            period = status.get("period", 0)
-            clock = status.get("clock", 0) / 60
-            
-            # Dados da Competição e Times
             competitions = event.get("competitions", [{}])
             league_name = competitions[0].get("tournament", {}).get("name", "Futebol Internacional")
             competitors = competitions[0].get("competitors", [])
             
-            home = {}
-            away = {}
-            
+            home_team, away_team = "Casa", "Visitante"
             for team in competitors:
                 if team.get("homeAway") == "home":
-                    home = team
+                    home_team = team.get("team", {}).get("displayName", "Casa")
                 else:
-                    away = team
-                    
-            home_team = home.get("team", {}).get("displayName", "Casa")
-            away_team = away.get("team", {}).get("displayName", "Visitante")
-            home_score = int(home.get("score", "0"))
-            away_score = int(away.get("score", "0"))
+                    away_team = team.get("team", {}).get("displayName", "Visitante")
             
-            # Estatísticas Totais / Parciais
-            home_corners = get_stat(home, "cornerKicks")
-            away_corners = get_stat(away, "cornerKicks")
-            total_corners = home_corners + away_corners
-
-            home_cards = get_stat(home, "yellowCards") + get_stat(home, "redCards")
-            away_cards = get_stat(away, "yellowCards") + get_stat(away, "redCards")
-            total_cards = home_cards + away_cards
-
-            # Inicializa registro do jogo se não existir
-            if match_id not in matches_with_alerts:
-                matches_with_alerts[match_id] = {
+            if team_query.lower() in home_team.lower() or team_query.lower() in away_team.lower():
+                found = True
+                
+                # Se já está sendo monitorado, avisa
+                if match_id in tracked_matches:
+                    send_telegram(f"ℹ️ O jogo <b>{home_team} x {away_team}</b> já está na sua lista de monitoramento ativo!")
+                    return
+                
+                # Adiciona ao dicionário de monitoramento
+                tracked_matches[match_id] = {
                     "home": home_team,
                     "away": away_team,
-                    "alerts_sent": []
+                    "league": league_name,
+                    "alerts_sent": ["Pré-Jogo / Mercado Geral"],
+                    "notified_ht_goal": False,
+                    "notified_ht_corner": False,
+                    "notified_ft_goal": False,
+                    "notified_cards": False,
+                    "result_sent": False
                 }
-
-            # ---------------------------------------------------------
-            # 1. PRÉ-JOGO (3 HORAS ANTES)
-            # ---------------------------------------------------------
-            if status_type == "STATUS_SCHEDULED":
-                try:
-                    match_time = datetime.strptime(date_str, "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc)
-                    diff_hours = (match_time - now).total_seconds() / 3600
-                except:
-                    diff_hours = 999
                 
-                if 0 < diff_hours <= 3.0:
-                    if match_id not in notified_prematch_batch:
-                        detailed_msg = generate_prematch_analysis(home_team, away_team, league_name)
-                        send_telegram(detailed_msg)
-                        notified_prematch_batch.add(match_id)
-                        matches_with_alerts[match_id]["alerts_sent"].append("Pré-Jogo / Mercado Geral")
+                # Envia a análise pré-jogo imediatamente
+                msg = generate_prematch_analysis(home_team, away_team, league_name)
+                send_telegram(msg)
+                break
+                
+        if not found:
+            send_telegram(f"❌ Nenhum jogo encontrado hoje para o time: <b>{team_query.title()}</b>.")
+            
+    except Exception as e:
+        print(f"[ERRO SOLICITAÇÃO] {e}")
+        send_telegram("⚠️ Ocorreu um erro ao buscar o jogo.")
 
-            # ---------------------------------------------------------
-            # 2. AO VIVO: ANÁLISES INDIVIDUAIS
-            # ---------------------------------------------------------
-            elif status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
+# ==========================================
+# LEITOR DE COMANDOS DO TELEGRAM
+# ==========================================
+def check_telegram_commands():
+    global last_telegram_update_id
+    if not TELEGRAM_TOKEN:
+        return
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={last_telegram_update_id + 1}&timeout=1"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code != 200:
+            return
+        data = response.json()
+        for result in data.get("result", []):
+            last_telegram_update_id = result.get("update_id", last_telegram_update_id)
+            message = result.get("message", {})
+            text = message.get("text", "").strip()
+            
+            if text.startswith("/analisar"):
+                parts = text.split(maxsplit=1)
+                if len(parts) > 1:
+                    team_name = parts[1].strip()
+                    send_telegram(f"🔍 Buscando e ativando monitoramento para: <b>{team_name.title()}</b>...")
+                    request_match_analysis(team_name)
+                else:
+                    send_telegram("⚠️ Use o formato correto, ex: <code>/analisar Palmeiras</code>")
+            
+            elif text == "/listar":
+                if tracked_matches:
+                    lista = "\n".join([f"• {m['home']} x {m['away']}" for m in tracked_matches.values()])
+                    send_telegram(f"📋 <b>Jogos sob monitoramento atual:</b>\n{lista}")
+                else:
+                    send_telegram("📋 Nenhum jogo selecionado no momento. Use <code>/analisar [Time]</code> para adicionar partidas.")
+            
+            elif text == "/limpar":
+                tracked_matches.clear()
+                send_telegram("🗑️ Lista de monitoramento limpa com sucesso.")
+            
+            elif text == "/ajuda":
+                help_msg = (
+                    "🤖 <b>Painel de Controle do Bot:</b>\n\n"
+                    "• O bot não envia nada sozinho (sem spam).\n"
+                    "• <code>/analisar [Time]</code> - Adiciona o jogo do time escolhido para receber análises, alertas ao vivo e o Green/Red (Ex: /analisar Palmeiras)\n"
+                    "• <code>/listar</code> - Mostra os jogos que você pediu para monitorar hoje\n"
+                    "• <code>/limpar</code> - Esvazia a lista de monitoramento\n"
+                    "• <code>/ajuda</code> - Mostra este menu"
+                )
+                send_telegram(help_msg)
+                
+    except Exception as e:
+        print(f"[ERRO COMANDOS TELEGRAM] {e}")
+
+# ==========================================
+# MONITORAMENTO EXCLUSIVO DOS JOGOS ESCOLHIDOS
+# ==========================================
+def monitor_tracked_matches():
+    if not tracked_matches:
+        return  # Se você não escolheu nenhum jogo, o bot não gasta energia nem manda nada.
+
+    try:
+        response = requests.get(ESPN_URL, timeout=15)
+        if response.status_code != 200:
+            return
+
+        data = response.json()
+        events = data.get("events", [])
+        
+        for event in events:
+            match_id = event.get("id")
+            
+            # Só processa se o jogo estiver na sua lista de escolhidos
+            if match_id in tracked_matches:
+                match_data = tracked_matches[match_id]
+                
+                status = event.get("status", {})
+                status_type = status.get("type", {}).get("name", "")
+                period = status.get("period", 0)
+                clock = status.get("clock", 0) / 60
                 clock_display = status.get("displayClock", f"{int(clock)}'")
+                
+                competitions = event.get("competitions", [{}])
+                competitors = competitions[0].get("competitors", [])
+                
+                home, away = {}, {}
+                for team in competitors:
+                    if team.get("homeAway") == "home":
+                        home = team
+                    else:
+                        away = team
+                        
+                home_team = match_data["home"]
+                away_team = match_data["away"]
+                home_score = int(home.get("score", "0"))
+                away_score = int(away.get("score", "0"))
+                
+                home_corners = get_stat(home, "cornerKicks")
+                away_corners = get_stat(away, "cornerKicks")
+                total_corners = home_corners + away_corners
 
-                # --- 1º TEMPO (Gols HT) ---
-                if period == 1 and 15 <= clock <= 35:
-                    Key_goal = f"{match_id}_ht_goal"
-                    if home_score == 0 and away_score == 0 and Key_goal not in notified_ht_goals:
+                home_cards = get_stat(home, "yellowCards") + get_stat(home, "redCards")
+                away_cards = get_stat(away, "yellowCards") + get_stat(away, "redCards")
+                total_cards = home_cards + away_cards
+
+                # AO VIVO: Gols HT
+                if status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
+                    if period == 1 and 15 <= clock <= 35 and home_score == 0 and away_score == 0 and not match_data["notified_ht_goal"]:
                         msg_goal = (
                             f"⚽ <b>PRESSÃO DE GOL NO 1º TEMPO</b>\n\n"
                             f"⚔️ <b>{home_team}</b> 0 x 0 <b>{away_team}</b>\n"
                             f"⏱️ <b>Tempo:</b> {clock_display} (1ºT)\n\n"
-                            f"💡 <i>Pressão alta detectada na primeira metade! Boa janela para o primeiro tento.</i>\n"
+                            f"💡 <i>Pressão alta detectada! Boa janela para o primeiro tento.</i>\n"
                             f"🎯 <b>Entrada Sugerida:</b> Over 0.5 Gols HT"
                         )
                         send_telegram(msg_goal)
-                        notified_ht_goals.add(Key_goal)
-                        matches_with_alerts[match_id]["alerts_sent"].append("Over 0.5 Gols HT")
+                        match_data["notified_ht_goal"] = True
+                        match_data["alerts_sent"].append("Over 0.5 Gols HT")
 
-                # --- ESCANTEIOS NO 1º TEMPO ---
-                if period == 1 and 10 <= clock <= 40:
-                    Key_corner = f"{match_id}_ht_corner"
-                    if total_corners >= 4 and Key_corner not in notified_ht_corners:
+                    # AO VIVO: Escanteios HT
+                    if period == 1 and 10 <= clock <= 40 and total_corners >= 4 and not match_data["notified_ht_corner"]:
                         msg_corner = (
                             f"🚩 <b>PRESSÃO DE ESCANTEIOS (1º TEMPO)</b>\n\n"
                             f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
@@ -221,13 +296,11 @@ def check_matches():
                             f"🎯 <b>Entrada Sugerida:</b> Mais de 4.5 Escanteios HT"
                         )
                         send_telegram(msg_corner)
-                        notified_ht_corners.add(Key_corner)
-                        matches_with_alerts[match_id]["alerts_sent"].append("Mais de 4.5 Escanteios HT")
+                        match_data["notified_ht_corner"] = True
+                        match_data["alerts_sent"].append("Mais de 4.5 Escanteios HT")
 
-                # --- 2º TEMPO ---
-                elif period == 2 and 50 <= clock <= 85:
-                    Key_ft_goal = f"{match_id}_ft_goal"
-                    if Key_ft_goal not in notified_ft_goals:
+                    # AO VIVO: 2º Tempo
+                    elif period == 2 and 50 <= clock <= 85 and not match_data["notified_ft_goal"]:
                         msg_ft_goal = (
                             f"⚽ <b>PRESSÃO INTENSA NO 2º TEMPO</b>\n\n"
                             f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
@@ -236,61 +309,55 @@ def check_matches():
                             f"🎯 <b>Entrada Sugerida:</b> Gol no 2º Tempo / Over 1.5 FT"
                         )
                         send_telegram(msg_ft_goal)
-                        notified_ft_goals.add(Key_ft_goal)
-                        matches_with_alerts[match_id]["alerts_sent"].append("Gol no 2º Tempo / Over 1.5 FT")
+                        match_data["notified_ft_goal"] = True
+                        match_data["alerts_sent"].append("Gol no 2º Tempo / Over 1.5 FT")
 
-                # --- ANÁLISE DE CARTÕES ---
-                Key_cards = f"{match_id}_cards"
-                if total_cards >= 3 and clock <= 80 and Key_cards not in notified_cards:
-                    msg_cards = (
-                        f"🟨 <b>ALERTA DE CARTÕES NO JOGO</b>\n\n"
-                        f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
-                        f"⏱️ <b>Tempo:</b> {clock_display}\n"
-                        f"🟨 <b>Cartões:</b> {home_cards} x {away_cards} (Total: {total_cards})\n\n"
-                        f"🔥 <i>Partida truncada com muitas faltas.</i>\n"
-                        f"🎯 <b>Entrada Sugerida:</b> Mais de 3.5 ou 4.5 Cartões"
-                    )
-                    send_telegram(msg_cards)
-                    notified_cards.add(Key_cards)
-                    matches_with_alerts[match_id]["alerts_sent"].append("Mais Cartões")
-
-            # ---------------------------------------------------------
-            # 3. FIM DE JOGO: CONFERÊNCIA DE GREEN / RESULTADO
-            # ---------------------------------------------------------
-            elif status_type == "STATUS_FINAL" and match_id in matches_with_alerts:
-                if match_id not in notified_results:
-                    total_gols = home_score + away_score
-                    alerts_list = matches_with_alerts[match_id]["alerts_sent"]
-                    
-                    if alerts_list:
-                        # Avalia se bateu gols (exemplo prático baseado no total de gols da partida)
-                        resultado_texto = f"✅ <b>GREEN / ENTRADA VALIDADA!</b> 🎉\n\n" if total_gols > 0 else f"❌ <b>RED / ENTRADA ENCERRADA</b>\n\n"
-                        
-                        result_msg = (
-                            f"{resultado_texto}"
-                            f"🏁 <b>FIM DE JOGO:</b> {home_team} {home_score} x {away_score} {away_team}\n"
-                            f"📊 <b>Placar Final:</b> {total_gols} gol(s) na partida\n\n"
-                            f"📌 <i>Alertas que foram disparados neste jogo:</i>\n"
+                    # AO VIVO: Cartões
+                    if total_cards >= 3 and clock <= 80 and not match_data["notified_cards"]:
+                        msg_cards = (
+                            f"🟨 <b>ALERTA DE CARTÕES NO JOGO</b>\n\n"
+                            f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
+                            f"⏱️ <b>Tempo:</b> {clock_display}\n"
+                            f"🟨 <b>Cartões:</b> {home_cards} x {away_cards} (Total: {total_cards})\n\n"
+                            f"🔥 <i>Partida truncada com muitas faltas.</i>\n"
+                            f"🎯 <b>Entrada Sugerida:</b> Mais de 3.5 ou 4.5 Cartões"
                         )
-                        for alert in set(alerts_list):
-                            result_msg += f"   • {alert}\n"
-                            
-                        result_msg += f"\n----------------------------------------"
-                        send_telegram(result_msg)
+                        send_telegram(msg_cards)
+                        match_data["notified_cards"] = True
+                        match_data["alerts_sent"].append("Mais Cartões")
+
+                # FIM DE JOGO: GREEN / RED
+                elif status_type == "STATUS_FINAL" and not match_data["result_sent"]:
+                    total_gols = home_score + away_score
+                    alerts_list = match_data["alerts_sent"]
+                    
+                    resultado_texto = f"✅ <b>GREEN / ENTRADA VALIDADA!</b> 🎉\n\n" if total_gols > 0 else f"❌ <b>RED / ENTRADA ENCERRADA</b>\n\n"
+                    
+                    result_msg = (
+                        f"{resultado_texto}"
+                        f"🏁 <b>FIM DE JOGO:</b> {home_team} {home_score} x {away_score} {away_team}\n"
+                        f"📊 <b>Placar Final:</b> {total_gols} gol(s) na partida\n\n"
+                        f"📌 <i>Alertas disparados neste jogo:</i>\n"
+                    )
+                    for alert in set(alerts_list):
+                        result_msg += f"   • {alert}\n"
                         
-                    notified_results.add(match_id)
+                    result_msg += f"\n----------------------------------------"
+                    send_telegram(result_msg)
+                    match_data["result_sent"] = True
 
     except Exception as e:
-        print(f"[EXCEÇÃO] Erro na varredura: {e}")
+        print(f"[EXCEÇÃO NO MONITORAMENTO] {e}")
 
 # ==========================================
 # INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
-    print("[BOT INICIADO] Radar analítico com rastreamento de resultados ativado.")
+    print("[BOT INICIADO] Modo Sob Demanda (Zero Spam) ativado.")
     while True:
-        check_matches()
-        time.sleep(120)
+        check_telegram_commands()  # Fica atento se você pediu para analisar algum jogo
+        monitor_tracked_matches()  # Acompanha apenas os jogos que você colocou na lista
+        time.sleep(30)
 
 if __name__ == "__main__":
     threading.Thread(target=run_server, daemon=True).start()
