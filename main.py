@@ -12,10 +12,12 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 
-# Memória do Bot para evitar repetição
-notified_prematch_batch = set()  # Controla o lote de 3h antes
-notified_ht = set()
-notified_ft = set()
+# Memórias individuais para cada tipo de alerta (evita repetir o mesmo aviso no mesmo jogo)
+notified_prematch_batch = set()
+notified_ht_goals = set()
+notified_ht_corners = set()
+notified_cards = set()
+notified_ft_goals = set()
 
 # ==========================================
 # SERVIDOR HTTP (MANTÉM O RENDER ONLINE)
@@ -25,7 +27,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst V4 is Live!")
+        self.wfile.write(b"Bot Analyst Individual V5 is Live!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -38,7 +40,7 @@ def run_server():
     server.serve_forever()
 
 # ==========================================
-# FUNÇÕES DO TELEGRAM
+# FUNÇÃO DE ENVIO AO TELEGRAM
 # ==========================================
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
@@ -62,10 +64,10 @@ def get_stat(team_data, stat_name):
     return 0
 
 # ==========================================
-# LÓGICA PRINCIPAL DE VARREDURA
+# LÓGICA DE ANÁLISE INDIVIDUAL
 # ==========================================
 def check_matches():
-    global notified_prematch_batch, notified_ht, notified_ft
+    global notified_prematch_batch, notified_ht_goals, notified_ht_corners, notified_cards, notified_ft_goals
     try:
         response = requests.get(ESPN_URL, timeout=15)
         if response.status_code != 200:
@@ -98,17 +100,20 @@ def check_matches():
                     
             home_team = home.get("team", {}).get("displayName", "Casa")
             away_team = away.get("team", {}).get("displayName", "Visitante")
-            home_score = home.get("score", "0")
-            away_score = away.get("score", "0")
+            home_score = int(home.get("score", "0"))
+            away_score = int(away.get("score", "0"))
             
             # Estatísticas Ao Vivo
             home_corners = get_stat(home, "cornerKicks")
             away_corners = get_stat(away, "cornerKicks")
+            total_corners = home_corners + away_corners
+
             home_cards = get_stat(home, "yellowCards") + get_stat(home, "redCards")
             away_cards = get_stat(away, "yellowCards") + get_stat(away, "redCards")
+            total_cards = home_cards + away_cards
 
             # ---------------------------------------------------------
-            # 1. PRÉ-JOGO: Captura os jogos que faltam entre 0h e 3h para começar
+            # 1. PRÉ-JOGO (3 HORAS ANTES) - Lista consolidada
             # ---------------------------------------------------------
             if status_type == "STATUS_SCHEDULED":
                 try:
@@ -128,56 +133,83 @@ def check_matches():
                         })
 
             # ---------------------------------------------------------
-            # 2. AO VIVO 1º TEMPO (Pressão e Linhas)
+            # 2. AO VIVO: ANÁLISES INDIVIDUAIS POR MERCADO
             # ---------------------------------------------------------
-            elif status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"] and period == 1:
-                if 5 <= clock <= 55: 
-                    if home_corners >= 4 or away_corners >= 4:
-                        if match_id not in notified_ht:
-                            clock_display = status.get("displayClock", f"{int(clock)}'")
-                            msg = (
-                                f"🔥 <b>PRESSÃO EXTREMA NO 1º TEMPO (HT)</b> 🔥\n\n"
-                                f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
-                                f"⏱️ <b>Tempo:</b> {clock_display}\n\n"
-                                f"🚩 <b>Escanteios:</b> {home_team} ({home_corners}) x ({away_corners}) {away_team}\n"
-                                f"🟨 <b>Cartões:</b> {home_team} ({home_cards}) x ({away_cards}) {away_team}\n\n"
-                                f"🎯 <b>Entrada Recomendada:</b>\n"
-                                f"👉 Mais de 0.5 Gols HT ou Mais de 4.5 Escanteios HT"
-                            )
-                            send_telegram(msg)
-                            notified_ht.add(match_id)
+            elif status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
+                clock_display = status.get("displayClock", f"{int(clock)}'")
 
-            # ---------------------------------------------------------
-            # 3. AO VIVO 2º TEMPO (Pressão e Linhas)
-            # ---------------------------------------------------------
-            elif status_type == "STATUS_IN_PROGRESS" and period == 2:
-                if 50 <= clock <= 100:
-                    if home_corners >= 7 or away_corners >= 7:
-                        if match_id not in notified_ft:
-                            clock_display = status.get("displayClock", f"{int(clock)}'")
-                            msg = (
-                                f"🔥 <b>PRESSÃO EXTREMA NO 2º TEMPO (FT)</b> 🔥\n\n"
-                                f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
-                                f"⏱️ <b>Tempo:</b> {clock_display}\n\n"
-                                f"🚩 <b>Escanteios Totais:</b> {home_team} ({home_corners}) x ({away_corners}) {away_team}\n"
-                                f"🟨 <b>Cartões Totais:</b> {home_team} ({home_cards}) x ({away_cards}) {away_team}\n\n"
-                                f"🎯 <b>Entrada Recomendada:</b>\n"
-                                f"👉 Gol no 2º Tempo ou Mais de 8.5 Escanteios"
+                # --- 1º TEMPO (Até o intervalo) ---
+                if period == 1 and 10 <= clock <= 48:
+                    
+                    # A. Pressão para Gol HT (0x0 e jogo corrido)
+                    Key_goal = f"{match_id}_ht_goal"
+                    if home_score == 0 and away_score == 0 and Key_goal not in notified_ht_goals:
+                        # Critério: jogo em andamento com volume
+                        if clock >= 15:
+                            msg_goal = (
+                                f"⚽ <b>PRESSÃO DE GOL NO 1º TEMPO</b>\n\n"
+                                f"⚔️ <b>{home_team}</b> 0 x 0 <b>{away_team}</b>\n"
+                                f"⏱️ <b>Tempo:</b> {clock_display} (1ºT)\n\n"
+                                f"💡 <i>Pressão alta detectada! Grande chance de sair o primeiro tento antes do intervalo.</i>\n"
+                                f"🎯 <b>Entrada Sugerida:</b> Over 0.5 Gols HT"
                             )
-                            send_telegram(msg)
-                            notified_ft.add(match_id)
+                            send_telegram(msg_goal)
+                            notified_ht_goals.add(Key_goal)
 
-        # Se houver jogos novos no bloco de 3 horas antes, monta o painel unificado
+                    # B. Pressão de Escanteios HT (Bateu 4+ cantos no primeiro tempo)
+                    Key_corner = f"{match_id}_ht_corner"
+                    if total_corners >= 4 and Key_corner not in notified_ht_corners:
+                        msg_corner = (
+                            f"🚩 <b>PRESSÃO DE ESCANTEIOS (1º TEMPO)</b>\n\n"
+                            f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
+                            f"⏱️ <b>Tempo:</b> {clock_display} (1ºT)\n"
+                            f"📊 <b>Cantos Atuais:</b> {home_corners} x {away_corners} (Total: {total_corners})\n\n"
+                            f"🎯 <b>Entrada Sugerida:</b> Mais de 4.5 Escanteios HT"
+                        )
+                        send_telegram(msg_corner)
+                        notified_ht_corners.add(Key_corner)
+
+                # --- 2º TEMPO ---
+                elif period == 2 and 46 <= clock <= 95:
+                    
+                    # C. Pressão para Gol no 2º Tempo
+                    Key_ft_goal = f"{match_id}_ft_goal"
+                    if clock >= 60 and Key_ft_goal not in notified_ft_goals:
+                        msg_ft_goal = (
+                            f"⚽ <b>PRESSÃO INTENSA NO 2º TEMPO</b>\n\n"
+                            f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
+                            f"⏱️ <b>Tempo:</b> {clock_display} (2ºT)\n\n"
+                            f"💡 <i>O jogo está lá e cá com pressão ofensiva.</i>\n"
+                            f"🎯 <b>Entrada Sugerida:</b> Gol no 2º Tempo / Over 1.5 FT"
+                        )
+                        send_telegram(msg_ft_goal)
+                        notified_ft_goals.add(Key_ft_goal)
+
+                # --- ANÁLISE GERAL DE CARTÕES (Serve para qualquer momento do jogo) ---
+                Key_cards = f"{match_id}_cards"
+                if total_cards >= 3 and clock <= 85 and Key_cards not in notified_cards:
+                    msg_cards = (
+                        f"🟨 <b>ALERTA DE CARTÕES NO JOGO</b>\n\n"
+                        f"⚔️ <b>{home_team}</b> {home_score} x {away_score} <b>{away_team}</b>\n"
+                        f"⏱️ <b>Tempo:</b> {clock_display}\n"
+                        f"🟨 <b>Cartões Amarelos/Vermelhos:</b> {home_cards} x {away_cards} (Total: {total_cards})\n\n"
+                        f"🔥 <i>Jogo truncado com muitas faltas e clima tenso.</i>\n"
+                        f"🎯 <b>Entrada Sugerida:</b> Mais de 3.5 ou 4.5 Cartões na Partida"
+                    )
+                    send_telegram(msg_cards)
+                    notified_cards.add(Key_cards)
+
+        # Envia a lista consolidada das 3 horas antes, se houver
         if upcoming_matches_list:
-            batch_message = "📋 <b>RADAR PRÉ-JOGO: LISTA DE ENTRADAS (3H ANTES)</b> 📋\n\n"
+            batch_message = "📋 <b>RADAR PRÉ-JOGO: JOGOS EM 3 HORAS</b> 📋\n\n"
             for m in upcoming_matches_list:
                 batch_message += (
                     f"⚔️ <b>{m['home']}</b> x <b>{m['away']}</b>\n"
                     f"⏰ Horário: {m['time']}\n"
-                    f"📊 <b>Projeções de Tendência:</b>\n"
-                    f"   • Favorito / Dupla Chance: Analisar mandante\n"
+                    f"📊 <b>Tendências Principais:</b>\n"
+                    f"   • Vitória / Dupla Chance (1X2)\n"
                     f"   • Cantos Esperados: Mais de 8.5 🚩\n"
-                    f"   • Cartões Esperados: Mais de 1.5 🟨\n\n"
+                    f"   • Cartões Esperados: Mais de 3.5 🟨\n\n"
                     f"----------------------------------------\n"
                 )
                 notified_prematch_batch.add(m["id"])
@@ -185,13 +217,13 @@ def check_matches():
             send_telegram(batch_message)
 
     except Exception as e:
-        print(f"[EXCEÇÃO] Erro na varredura geral: {e}")
+        print(f"[EXCEÇÃO] Erro na varredura: {e}")
 
 # ==========================================
 # INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
-    print("[BOT INICIADO] Radar consolidado e Pressão ao vivo ativos.")
+    print("[BOT INICIADO] Análise individual por mercado ativa.")
     while True:
         check_matches()
         time.sleep(120)
