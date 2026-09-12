@@ -6,7 +6,7 @@ import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# --- SERVIDOR WEB MÍNIMO PARA O RENDER ---
+# --- SERVIDOR WEB MÍNIMO PARA MANTER NO RENDER ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -20,7 +20,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 def rodar_servidor_web():
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    print(f"🌐 Servidor web iniciado na porta {port} para o Render.")
+    print(f"🌐 Servidor web rodando na porta {port}.")
     server.serve_forever()
 
 threading.Thread(target=rodar_servidor_web, daemon=True).start()
@@ -35,6 +35,7 @@ HEADERS = {
     "x-rapidapi-host": "v3.football.api-sports.io"
 }
 
+# Ligas monitoradas (Brasileirão A e B, Premier, Champions, Libertadores, La Liga, Saudi, Ligue 1)
 LIGAS_PRINCIPAIS = [71, 72, 39, 2, 13, 140, 307, 61]
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -73,15 +74,14 @@ async def verificar_entradas_pre_jogo():
             liga_id = jogo["league"]["id"]
             status = jogo["fixture"]["status"]["short"]
             
-            # Aceita qualquer status de jogo que ainda não começou (NS, TBD)
             if liga_id in LIGAS_PRINCIPAIS and status in ["NS", "TBD"]:
                 data_jogo_str = jogo["fixture"]["date"]
                 data_jogo = datetime.fromisoformat(data_jogo_str.replace("Z", "+00:00"))
                 
                 diferenca_minutos = (data_jogo - agora_utc).total_seconds() / 60
                 
-                # Janela ampliada: pega jogos que iniciam em até 2 horas (120 min)
-                if 0 <= diferenca_minutos <= 120:
+                # Janela de até 180 min (3 horas) antes do jogo
+                if 0 <= diferenca_minutos <= 180:
                     liga = jogo["league"]["name"]
                     pais = jogo["league"]["country"]
                     casa = jogo["teams"]["home"]["name"]
@@ -89,15 +89,15 @@ async def verificar_entradas_pre_jogo():
                     horario_br = (data_jogo - timedelta(hours=3)).strftime("%H:%M")
 
                     msg = (
-                        f"🚨 **ENTRADA PRÉ-JOGO (INÍCIO EM BREVE)**\n\n"
+                        f"🚨 **ENTRADA PRÉ-JOGO CONFIRMADA**\n\n"
                         f"🏆 **Liga:** {pais} - {liga}\n"
                         f"⚔️ **Confronto:** {casa} x {fora}\n"
                         f"⏰ **Início:** {horario_br} (Horário de Brasília)\n\n"
-                        f"📊 **Sugestão de Entrada:**\n"
+                        f"📊 **Sugestões de Entrada:**\n"
                         f"⚽ **Gols:** Over 1.5 Gols na Partida / Over 0.5 HT\n"
                         f"🚩 **Escanteios:** Over 8.5 Cantos no Jogo\n"
                         f"🟨 **Cartões:** Over 3.5 Cartões no Jogo\n\n"
-                        f"💡 **Recomendação:** Gestão de 1 a 2 unidades."
+                        f"💡 **Gestão:** 1% a 2% da banca."
                     )
                     await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
                     jogos_pre_notificados.add(fixture_id)
@@ -131,8 +131,9 @@ async def monitorar_jogos_ao_vivo():
             if status_curto not in ["1H", "2H"]:
                 continue
 
-            ultimo_minuto_alertado = ultimos_alertas_tempo.get(fixture_id, -10)
-            if (tempo - ultimo_minuto_alertado) < 10:
+            # Evita enviar alerta do mesmo jogo num intervalo menor que 12 minutos
+            ultimo_minuto_alertado = ultimos_alertas_tempo.get(fixture_id, -15)
+            if (tempo - ultimo_minuto_alertado) < 12:
                 continue
 
             casa = jogo["teams"]["home"]["name"]
@@ -141,6 +142,7 @@ async def monitorar_jogos_ao_vivo():
             gols_fora = jogo["goals"]["away"] or 0
             liga = jogo["league"]["name"]
 
+            # Consulta estatísticas somente para jogos ativos das ligas principais
             url_stats = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
             res_stats = requests.get(url_stats, headers=HEADERS).json()
             stats_data = res_stats.get("response", [])
@@ -153,45 +155,48 @@ async def monitorar_jogos_ao_vivo():
             
             total_finalizacoes = chutes_no_gol + chutes_fora
 
-            alta_pressao_chutes = chutes_no_gol >= 3 or total_finalizacoes >= 7
-            reta_final_pressao = (tempo >= 70) and (abs(gols_casa - gols_fora) <= 1)
+            # REGRAS INTELIGENTES DE PRESSÃO:
+            # - Pressão de finalizações: 2+ chutes no gol ou 5+ finalizações totais
+            # - Pressão de tempo: Reta final (65'+ minutos) com placar apertado (diferença <= 1 gol)
+            pressao_chutes = chutes_no_gol >= 2 or total_finalizacoes >= 5
+            pressao_reta_final = (tempo >= 65) and (abs(gols_casa - gols_fora) <= 1)
 
-            if alta_pressao_chutes or reta_final_pressao:
+            if pressao_chutes or pressao_reta_final:
                 etapa = "1º Tempo" if status_curto == "1H" else "2º Tempo"
                 
                 msg_live = (
-                    f"🔥 **ALERTA DE PRESSÃO EXTREMA ({tempo}')**\n\n"
+                    f"🔥 **ALERTA DE PRESSÃO AO VIVO ({tempo}')**\n\n"
                     f"🏆 **Liga:** {liga}\n"
                     f"⚔️ **Confronto:** {casa} {gols_casa} x {gols_fora} {fora}\n"
                     f"⏱️ **Minuto:** {tempo}' ({etapa})\n\n"
-                    f"📊 **Estatísticas ao Vivo:**\n"
+                    f"📈 **Estatísticas de Pressão:**\n"
                     f"🎯 **Chutes no Gol:** {chutes_no_gol} | **Total Chutes:** {total_finalizacoes}\n"
                     f"🚩 **Escanteios:** {escanteios}\n"
                     f"🟨 **Cartões:** {cartoes_amarelos} Amarelos | {cartoes_vermelhos} Vermelhos\n\n"
-                    f"⚡ **Oportunidades Recomendadas:**\n"
-                    f"⚽ **Próximo Gol / Over Gol Limite** (Jogo muito movimentado)\n"
-                    f"🚩 **Escanteios Limite** (Pressão na área)\n"
-                    f"🟨 **Cartões** (Jogo faltoso/Reta final)\n\n"
-                    f"💡 *Entrar com gestão de banca (1% a 2%).*"
+                    f"⚡ **Sugestões de Entrada:**\n"
+                    f"⚽ **Próximo Gol / Over Gol Limite**\n"
+                    f"🚩 **Escanteios Limite**\n"
+                    f"🟨 **Over Cartões**\n\n"
+                    f"💡 *Gestão de banca recomendada: 1% a 2%.*"
                 )
                 
                 await bot.send_message(chat_id=CHAT_ID, text=msg_live, parse_mode="Markdown")
                 ultimos_alertas_tempo[fixture_id] = tempo
                 alertas_enviados += 1
 
-            if alertas_enviados >= 3:
+            if alertas_enviados >= 2:
                 break
                 
             await asyncio.sleep(1.5)
 
     except Exception as e:
-        print(f"Erro no Ao Vivo com Estatísticas: {e}")
+        print(f"Erro na verificação ao vivo: {e}")
 
 async def main():
-    print("🚀 Bot iniciado no Render (Pré-Jogo Ampliado 120min + Pressão Real)!")
+    print("🚀 Bot Operacional (Otimizado & Inteligente)!")
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="🤖 **Bot de Apostas Atualizado!**\nJanela pré-jogo ampliada para até 2 horas de antecedência.",
+        text="🤖 **Bot de Apostas Atualizado!**\nSistema otimizado para sensibilidade ideal e consumo eficiente de dados.",
         parse_mode="Markdown"
     )
     
@@ -199,10 +204,11 @@ async def main():
         try:
             await verificar_entradas_pre_jogo()
             await monitorar_jogos_ao_vivo()
-            await asyncio.sleep(300)
+            # Intervalo de 4 minutos entre buscas para equilibrar velocidade e uso de API
+            await asyncio.sleep(240)
             
         except Exception as e:
-            print(f"Erro no loop: {e}")
+            print(f"Erro no loop principal: {e}")
             await asyncio.sleep(60)
 
 if __name__ == "__main__":
