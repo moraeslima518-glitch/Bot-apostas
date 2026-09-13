@@ -4,5 +4,9 @@ requests
 schedule
 pytz
 urllib3
+pyTelegramBotAPI
+requests
+flask
+
 
 
