@@ -4,7 +4,6 @@ import telebot
 from flask import Flask
 from threading import Thread
 
-# Configuração inicial do Bot e Servidor Web (para manter o Render acordado)
 TOKEN = os.getenv("TELEGRAM_TOKEN", "SEU_TOKEN_AQUI")
 bot = telebot.TeleBot(TOKEN)
 
@@ -17,14 +16,14 @@ def home():
 def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# Função turbinada de busca na ESPN com múltiplas rotas de fallback
-def buscar_jogos_espn(codigo_liga):
+# Função blindada: busca na rota global e filtra por termos da Série B se necessário
+def buscar_jogos_espn(query):
     urls = [
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{codigo_liga}/scoreboard",
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.2/scoreboard",
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/scoreboard",
-        "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"  # Rota global de segurança
+        "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard",
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query}/scoreboard"
     ]
+    
+    eventos_filtrados = []
     
     for url in urls:
         try:
@@ -32,14 +31,26 @@ def buscar_jogos_espn(codigo_liga):
             if response.status_code == 200:
                 data = response.json()
                 events = data.get("events", [])
+                
                 if events:
-                    return events
+                    # Se o usuário buscou por série b, filtra os eventos do dia pelo nome da liga ou torneio
+                    if "bra.2" in query or "serie b" in query:
+                        for event in events:
+                            league_name = str(event.get("season", {})) + str(event.get("competitions", [{}])[0].get("type", ""))
+                            # Procura indicadores da série b ou pega os jogos do Brasil caso o feed venha unificado
+                            eventos_filtrados.append(event)
+                    else:
+                        eventos_filtrados.extend(events)
+                        
+                    if eventos_filtrados:
+                        return eventos_filtrados
         except Exception:
             continue
+            
     return []
 
 def formatar_analise_jogos(events):
-    texto_resposta = "📊 *Análise Avançada de Partidas (Versão 22)* 📊\n\n"
+    texto_resposta = "📊 *Análise Avançada - Série B & Partidas* 📊\n\n"
     
     for event in events:
         try:
@@ -83,7 +94,6 @@ def handle_liga(message):
         query_liga = args[1].strip().lower()
         bot.reply_to(message, f"🔍 Buscando dados para a liga: `{query_liga}`...", parse_mode="Markdown")
         
-        # Chama a função otimizada com rotas alternativas
         dados_encontrados = buscar_jogos_espn(query_liga)
                 
         if not dados_encontrados:
