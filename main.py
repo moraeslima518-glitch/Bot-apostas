@@ -16,24 +16,39 @@ def home():
 def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# Função de busca universal: prioriza a rota específica da liga (ex: arg.1, ksa.1) e faz fallback global
+# Função de busca universal com tratamento inteligente para Arábia Saudita, Argentina e outras ligas
 def buscar_jogos_espn(query):
     query_limpa = query.strip().lower()
     
-    urls = [
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query_limpa}/scoreboard",
-        "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
-    ]
+    urls_a_testar = []
+    
+    if "arg" in query_limpa or "argentina" in query_limpa:
+        urls_a_testar = [
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/arg.1/scoreboard",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/arg.liga/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+        ]
+    elif "ksa" in query_limpa or "arabia" in query_limpa or "saudita" in query_limpa:
+        urls_a_testar = [
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.1/scoreboard",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.pro/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+        ]
+    else:
+        urls_a_testar = [
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query_limpa}/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+        ]
     
     eventos_encontrados = []
-    for url in urls:
+    for url in urls_a_testar:
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 events = data.get("events", [])
                 if events:
-                    if query_limpa in url:
+                    if query_limpa in url and len(events) > 0:
                         return events
                     eventos_encontrados.extend(events)
         except Exception:
@@ -124,7 +139,7 @@ def handle_liga(message):
     try:
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
-            bot.reply_to(message, "⚠️ Use o formato correto, ex: `/liga arg.1`", parse_mode="Markdown")
+            bot.reply_to(message, "⚠️ Use o formato correto, ex: `/liga arg.1` ou `/liga ksa.1`", parse_mode="Markdown")
             return
         
         query_liga = args[1].strip().lower()
