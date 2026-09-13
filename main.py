@@ -3,7 +3,7 @@ import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import requests
-from datetime import datetime, timezone
+from datetime import datetime
 import hashlib
 
 # ==========================================
@@ -12,9 +12,8 @@ import hashlib
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-# Dicionários de controle
-tracked_matches = {}      # Jogos ativos monitorados
-tracked_leagues = set()   # Ligas ativadas (ex: 'bra.1', 'eng.1')
+tracked_matches = {}      
+tracked_leagues = set()   
 last_telegram_update_id = 0
 
 # ==========================================
@@ -25,7 +24,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst Pro V19 - Guaranteed Results & Tips!")
+        self.wfile.write(b"Bot Analyst Pro V20 - Multi-League Fix!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -102,30 +101,41 @@ def generate_prematch_analysis(home_team, away_team, league_name):
     return analysis
 
 # ==========================================
-# ADICIONAR LIGA
+# ADICIONAR LIGA (COM BUSCA FLEXÍVEL)
 # ==========================================
 def request_league_monitoring(league_code):
     league_code = league_code.lower().strip()
     today_str = datetime.now().strftime("%Y%m%d")
-    url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard?dates={today_str}"
+    
+    # Tenta com a data de hoje e, se falhar, tenta sem o filtro restrito de data
+    urls = [
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard?dates={today_str}",
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard"
+    ]
+    
+    events = []
+    league_name = league_code.upper()
+    data = {}
     
     try:
-        response = requests.get(url, timeout=15)
-        if response.status_code != 200:
-            send_telegram(f"❌ Não foi possível acessar a liga <code>{league_code}</code>.")
-            return
-
-        data = response.json()
-        events = data.get("events", [])
+        for url in urls:
+            response = requests.get(url, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                events = data.get("events", [])
+                if events:
+                    break
         
         if not events:
-            send_telegram(f"⚠️ A liga <code>{league_code}</code> não possui jogos para hoje.")
+            send_telegram(f"⚠️ A liga <code>{league_code}</code> não retornou partidas ativas no momento pela API.")
             return
 
-        league_name = data.get("leagues", [{}])[0].get("name", league_code.upper())
+        if data.get("leagues"):
+            league_name = data.get("leagues", [{}])[0].get("name", league_code.upper())
+            
         tracked_leagues.add(league_code)
-        
         added_count = 0
+        
         for event in events:
             match_id = event.get("id")
             competitions = event.get("competitions", [{}])
@@ -145,7 +155,6 @@ def request_league_monitoring(league_code):
                     "league": league_name,
                     "alerts_sent": ["Análise Pré-Jogo & BTTS"],
                     "notified_ht_goal": False,
-                    "notified_ht_corner": False,
                     "notified_ft_goal": False,
                     "result_sent": False
                 }
@@ -159,6 +168,7 @@ def request_league_monitoring(league_code):
 
     except Exception as e:
         print(f"[ERRO LIGA] {e}")
+        send_telegram(f"❌ Erro ao processar a liga <code>{league_code}</code>.")
 
 # ==========================================
 # LEITOR DE COMANDOS DO TELEGRAM
@@ -183,10 +193,10 @@ def check_telegram_commands():
                 parts = text.split(maxsplit=1)
                 if len(parts) > 1:
                     league_code = parts[1].strip()
-                    send_telegram(f"🔍 Carregando jogos de <code>{league_code}</code>...")
+                    send_telegram(f"🔍 Buscando dados de <code>{league_code}</code>...")
                     request_league_monitoring(league_code)
                 else:
-                    send_telegram("⚠️ Informe o código da liga. Exemplo: <code>/liga bra.1</code>")
+                    send_telegram("⚠️ Informe o código da liga. Exemplo: <code>/liga esp.1</code>")
             
             elif text == "/listar":
                 msg_list = f"📋 <b>Ligas Ativas:</b> {list(tracked_leagues)}\n⚽ <b>Jogos na fila:</b> {len(tracked_matches)}"
@@ -204,17 +214,15 @@ def check_telegram_commands():
         print(f"[ERRO COMANDOS] {e}")
 
 # ==========================================
-# MONITORAMENTO AO VIVO E VALIDAÇÃO DE RESULTADOS
+# MONITORAMENTO AO VIVO E VALIDAÇÃO
 # ==========================================
 def monitor_tracked_matches():
     if not tracked_leagues:
         return
 
     try:
-        today_str = datetime.now().strftime("%Y%m%d")
-        
         for league_code in list(tracked_leagues):
-            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard?dates={today_str}"
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard"
             response = requests.get(url, timeout=10)
             if response.status_code != 200:
                 continue
@@ -249,12 +257,7 @@ def monitor_tracked_matches():
                     away_team = match_data["away"]
                     home_score = int(home.get("score", "0"))
                     away_score = int(away.get("score", "0"))
-                    
-                    home_corners = get_stat(home, "cornerKicks")
-                    away_corners = get_stat(away, "cornerKicks")
-                    total_corners = home_corners + away_corners
 
-                    # ALERTAS AO VIVO
                     if status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
                         if period == 1 and 15 <= clock <= 35 and home_score == 0 and away_score == 0 and not match_data["notified_ht_goal"]:
                             send_telegram(f"⚽ <b>[{league_name}] AO VIVO: GOLS 1ºT</b>\n{home_team} 0 x 0 {away_team} ({clock_display})\n🎯 <b>Sugestão:</b> Over 0.5 Gols HT")
@@ -266,11 +269,8 @@ def monitor_tracked_matches():
                             match_data["notified_ft_goal"] = True
                             match_data["alerts_sent"].append("Gol no 2º Tempo / Over 1.5")
 
-                    # FIM DE JOGO - FORÇA O ENVIO DO GREEN / RED PARA TODA PARTIDA FINALIZADA
                     if status_type == "STATUS_FINAL" and not match_data["result_sent"]:
                         total_gols = home_score + away_score
-                        
-                        # Critério de Green (se saiu mais de 0 ou 1 gol dependendo da entrada, aqui validamos de forma ampla)
                         if total_gols > 0:
                             resultado_titulo = "✅ <b>GREEN / ENTRADA VALIDADA!</b> 🎉"
                         else:
@@ -280,7 +280,7 @@ def monitor_tracked_matches():
                             f"{resultado_titulo}\n\n"
                             f"🏁 <b>FIM DE JOGO [{league_name}]:</b>\n"
                             f"<b>{home_team} {home_score} x {away_score} {away_team}</b>\n\n"
-                            f"📌 <i>Resumo das Análises / Entradas do Jogo:</i>\n"
+                            f"📌 <i>Resumo das Análises / Entradas:</i>\n"
                         )
                         for alert in set(match_data["alerts_sent"]):
                             result_msg += f"   • {alert}\n"
@@ -296,7 +296,7 @@ def monitor_tracked_matches():
 # INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
-    print("[BOT INICIADO] Versão 19 - Validação de Green/Red garantida.")
+    print("[BOT INICIADO] Versão 20 - Conexão flexível de ligas.")
     while True:
         check_telegram_commands()
         monitor_tracked_matches()
