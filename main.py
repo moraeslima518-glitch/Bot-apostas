@@ -18,34 +18,23 @@ def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
 # ==========================================
-# 1. FUNÇÃO DE BUSCA PARA PRÉ-JOGO (MANTIDA)
+# 1. FUNÇÃO DE BUSCA TURBINADA (COM ROTA ARGENTINA CORRIGIDA)
 # ==========================================
 def buscar_jogos_espn(query):
     query_limpa = query.strip().lower()
     
-    if "arg" in query_limpa or "argentina" in query_limpa:
-        url_global = "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
-        try:
-            response = requests.get(url_global, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                events = data.get("events", [])
-                jogos_argentina = []
-                for event in events:
-                    str_evento = str(event).lower()
-                    if any(termo in str_evento for termo in ["argentina", "liga profesional", "argentino", "boca", "river", "racing", "independiente", "san lorenzo", "velez", "estudiantes"]):
-                        jogos_argentina.append(event)
-                if jogos_argentina:
-                    return jogos_argentina
-                return events
-        except Exception:
-            pass
-
     urls_a_testar = []
-    if "ksa" in query_limpa or "arabia" in query_limpa or "saudita" in query_limpa:
+    
+    if "arg" in query_limpa or "argentina" in query_limpa:
         urls_a_testar = [
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.1/scoreboard",
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.pro/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/arg.1/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/arg.copa_liga/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+        ]
+    elif "ksa" in query_limpa or "arabia" in query_limpa or "saudita" in query_limpa:
+        urls_a_testar = [
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.1/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.pro/scoreboard",
             "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
         ]
     else:
@@ -62,12 +51,24 @@ def buscar_jogos_espn(query):
                 data = response.json()
                 events = data.get("events", [])
                 if events:
+                    # Se for busca específica de liga e encontrou eventos, retorna direto
                     if query_limpa in url and len(events) > 0:
                         return events
                     eventos_encontrados.extend(events)
         except Exception:
             continue
             
+    # Se testou as rotas específicas e caiu no global, filtramos se for Argentina ou retornamos os eventos
+    if ("arg" in query_limpa or "argentina" in query_limpa) and eventos_encontrados:
+        filtrados_arg = []
+        for event in eventos_encontrados:
+            str_ev = str(event).lower()
+            if any(t in str_ev for t in ["arg", "argentina", "boca", "river", "racing", "independiente", "san lorenzo", "velez", "estudiantes", "talleres", "rosario", "lanus"]):
+                if event not in filtrados_arg:
+                    filtrados_arg.append(event)
+        if filtrados_arg:
+            return filtrados_arg
+
     return eventos_encontrados
 
 # ==========================================
@@ -141,10 +142,9 @@ def formatar_analise_jogos(events):
     return texto_resposta
 
 # ==========================================
-# 3. MÓDULO DE VARREDURA AO VIVO (ADICIONADO)
+# 3. MÓDULO DE VARREDURA AO VIVO (MANTIDO)
 # ==========================================
 def varredura_jogos_ao_vivo():
-    """Função de monitoramento que roda em segundo plano para capturar oportunidades ao vivo"""
     while True:
         try:
             url = "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
@@ -152,27 +152,16 @@ def varredura_jogos_ao_vivo():
             if response.status_code == 200:
                 data = response.json()
                 events = data.get("events", [])
-                
                 for event in events:
                     status_type = event.get("status", {}).get("type", {}).get("state", "")
-                    # Verifica se o jogo está realmente ao vivo (in progress)
                     if status_type == "in":
                         competitions = event.get("competitions", [{}])[0]
                         competitors = competitions.get("competitors", [])
                         if len(competitors) < 2:
                             continue
-                            
-                        home_team = competitors[0].get("team", {}).get("displayName", "Casa")
-                        away_team = competitors[1].get("team", {}).get("displayName", "Fora")
-                        clock = event.get("status", {}).get("displayClock", "AO VIVO")
-                        
-                        home_score = competitors[0].get("score", "0")
-                        away_score = competitors[1].get("score", "0")
-                        
-                        # Aqui você pode processar a lógica de alerta ao vivo se necessário
         except Exception:
             pass
-        time.sleep(300) # Roda a varredura a cada 5 minutos para não sobrecarregar o servidor
+        time.sleep(300)
 
 # ==========================================
 # 4. COMANDOS DO TELEGRAM (TODOS PRESERVADOS)
@@ -275,11 +264,9 @@ def handle_aovivo(message):
         bot.reply_to(message, f"⚠️ Erro no comando ao vivo: {str(e)}", parse_mode="Markdown")
 
 if __name__ == '__main__':
-    # Inicia a thread do servidor Flask para o Render manter o bot acordado
     t_web = Thread(target=run_web)
     t_web.start()
     
-    # Inicia a thread de varredura em segundo plano (Live Background Monitor)
     t_live = Thread(target=varredura_jogos_ao_vivo, daemon=True)
     t_live.start()
     
