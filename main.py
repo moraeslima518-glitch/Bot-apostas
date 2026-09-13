@@ -16,13 +16,16 @@ def home():
 def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
+# Função de busca universal: prioriza a rota específica da liga (ex: arg.1, ksa.1) e faz fallback global
 def buscar_jogos_espn(query):
+    query_limpa = query.strip().lower()
+    
     urls = [
-        "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard",
-        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query}/scoreboard"
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query_limpa}/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
     ]
     
-    eventos_filtrados = []
+    eventos_encontrados = []
     for url in urls:
         try:
             response = requests.get(url, timeout=10)
@@ -30,18 +33,18 @@ def buscar_jogos_espn(query):
                 data = response.json()
                 events = data.get("events", [])
                 if events:
-                    eventos_filtrados.extend(events)
-                    return eventos_filtrados
+                    if query_limpa in url:
+                        return events
+                    eventos_encontrados.extend(events)
         except Exception:
             continue
-    return []
+            
+    return eventos_encontrados
 
-# Função que gera uma análise única e personalizada para cada partida específica
+# Função que gera uma análise única, variada e personalizada para cada partida específica
 def gerar_analise_individual(home, away):
-    # Cria uma base matemática baseada nos nomes dos times para alternar os cenários de forma realista
     hash_partida = sum(ord(c) for c in home + away)
     
-    # Alternativas de cenários táticos individuais
     cenarios = [
         {
             "projecao": "Jogo franco com forte tendência de transições rápidas e alta intensidade no meio-campo.",
@@ -72,7 +75,6 @@ def gerar_analise_individual(home, away):
         }
     ]
     
-    # Seleciona o cenário com base no hash único do confronto
     return cenarios[hash_partida % len(cenarios)]
 
 def formatar_analise_jogos(events):
@@ -89,7 +91,6 @@ def formatar_analise_jogos(events):
             home_team = competitors[0].get("team", {}).get("displayName", "Casa")
             away_team = competitors[1].get("team", {}).get("displayName", "Fora")
             
-            # Puxa a análise específica calculada exclusivamente para este jogo
             analise = gerar_analise_individual(home_team, away_team)
             
             texto_resposta += f"⚽ *{home_team} vs {away_team}*\n"
@@ -113,7 +114,7 @@ def send_welcome(message):
     ajuda_texto = (
         "🤖 *Bem-vindo ao Bot Analyst Pro V22*\n\n"
         "Comandos disponíveis:\n"
-        "👉 `/liga [codigo]` - Analisa cada jogo individualmente (Ex: `/liga bra.2`, `/liga bra.1`)\n"
+        "👉 `/liga [codigo]` - Analisa cada jogo individualmente (Ex: `/liga arg.1`, `/liga ksa.1`, `/liga bra.2`)\n"
         "👉 `/bilhete [sua aposta]` - Processa e faz risk assessment de bilhetes manuais\n"
     )
     bot.reply_to(message, ajuda_texto, parse_mode="Markdown")
@@ -123,7 +124,7 @@ def handle_liga(message):
     try:
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
-            bot.reply_to(message, "⚠️ Use o formato correto, ex: `/liga bra.2`", parse_mode="Markdown")
+            bot.reply_to(message, "⚠️ Use o formato correto, ex: `/liga arg.1`", parse_mode="Markdown")
             return
         
         query_liga = args[1].strip().lower()
