@@ -16,7 +16,7 @@ def home():
 def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# Função de busca universal com tratamento inteligente para Arábia Saudita, Argentina e outras ligas
+# Função de busca universal com tratamento inteligente e corrigido para a Argentina e Arábia Saudita
 def buscar_jogos_espn(query):
     query_limpa = query.strip().lower()
     
@@ -25,6 +25,7 @@ def buscar_jogos_espn(query):
     if "arg" in query_limpa or "argentina" in query_limpa:
         urls_a_testar = [
             f"https://site.api.espn.com/apis/site/v2/sports/soccer/arg.1/scoreboard",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/arg.copa_liga/scoreboard",
             f"https://site.api.espn.com/apis/site/v2/sports/soccer/arg.liga/scoreboard",
             "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
         ]
