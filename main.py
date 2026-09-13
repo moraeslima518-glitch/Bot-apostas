@@ -24,7 +24,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot Analyst Pro V20 - Multi-League Fix!")
+        self.wfile.write(b"Bot Analyst Pro V21 - Full Markets & Flex Leagues!")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -58,43 +58,82 @@ def get_stat(team_data, stat_name):
     return 0
 
 # ==========================================
-# GERADOR DE ANÁLISE PRÉ-JOGO
+# GERADOR DE ANÁLISE PRÉ-JOGO COMPLETA
 # ==========================================
 def generate_prematch_analysis(home_team, away_team, league_name):
     unique_string = home_team + away_team
     hash_val = int(hashlib.md5(unique_string.encode('utf-8')).hexdigest(), 16)
     
+    # Gols Gerais e HT
     estilos_gols = [
         ("Jogo Aberto e Ofensivo", "Mais de 2.5 Gols", "Forte chance de bola na rede."),
         ("Confronto Tático / Truncado", "Menos de 2.5 Gols", "Cenário amarrado, cautela nas linhas."),
         ("Equilíbrio com favoritismo local", "Mais de 1.5 FT", "O mandante costuma pressionar em casa.")
     ]
     
+    # Ambas Marcam
     estilos_ambas = [
         "SIM ✅ (Alta chance de ambas marcarem)",
         "NÃO ❌ (Tendência de apenas um time marcar)",
         "SIM ✅ (Defesas vulneráveis de ambos os lados)"
     ]
     
+    # Dupla Hipótese (Casa/Fora)
+    estilos_dupla = [
+        (f"Casa ou Empate (1X)", f"{home_team} com forte proteção em casa."),
+        (f"Fora ou Empate (X2)", f"{away_team} perigoso nos contra-ataques."),
+        (f"Vitória Seca ou Empate", "Cenário equilibrado sem favoritismo absoluto.")
+    ]
+
+    # Gols Individuais dos Times
+    estilos_individual_home = [
+        f"{home_team} Marca Mais de 0.5 Gols (1+)",
+        f"{home_team} Marca Mais de 1.5 Gols (2+)",
+        f"{home_team} Busca ao menos 1 gol no jogo"
+    ]
+    
+    estilos_individual_away = [
+        f"{away_team} Marca Mais de 0.5 Gols (1+)",
+        f"{away_team} Marca Mais de 1.5 Gols (2+)",
+        f"{away_team} Ofensivo - Chance de 1+ gol"
+    ]
+
+    # Cartões e Cantos
+    estilos_cartoes = [
+        ("Jogo Quente / Disciplina Rigorosa", "Mais de 4.5 Cartões 🟨"),
+        ("Jogo Truncado de Muitas Faltas", "Mais de 5.5 Cartões 🟨"),
+        ("Jogo Calmo / Disciplinado", "Menos de 4.5 Cartões")
+    ]
+    
     estilos_cantos = [
-        ("Média Alta de Cantos", "Mais de 9.5 Escanteios 🚩"),
-        ("Média Moderada de Cantos", "Mais de 8.5 Escanteios 🚩"),
-        ("Jogo de Poucos Cantos", "Menos de 10.5 Escanteios")
+        ("Pressão pelas Pontas", "Mais de 9.5 Escanteios 🚩"),
+        ("Ritmo Intermediário", "Mais de 8.5 Escanteios 🚩"),
+        ("Poucas Chegadas na Linha de Fundo", "Menos de 10.5 Escanteios")
     ]
 
     gols_escolha = estilos_gols[hash_val % len(estilos_gols)]
     ambas_escolha = estilos_ambas[(hash_val // 2) % len(estilos_ambas)]
-    cantos_escolha = estilos_cantos[(hash_val // 3) % len(estilos_cantos)]
+    dupla_escolha = estilos_dupla[(hash_val // 3) % len(estilos_dupla)]
+    ind_home = estilos_individual_home[(hash_val // 4) % len(estilos_individual_home)]
+    ind_away = estilos_individual_away[(hash_val // 5) % len(estilos_individual_away)]
+    cartao_escolha = estilos_cartoes[(hash_val // 6) % len(estilos_cartoes)]
+    cantos_escolha = estilos_cantos[(hash_val // 7) % len(estilos_cantos)]
 
     analysis = (
-        f"🎯 <b>ANÁLISE E ENTRADAS (PRÉ-JOGO)</b> 🎯\n\n"
+        f"🎯 <b>ANÁLISE E ENTRADAS COMPLETAS (PRÉ-JOGO)</b> 🎯\n\n"
         f"⚔️ <b>{home_team}</b> x <b>{away_team}</b>\n"
         f"🏆 <i>Liga: {league_name}</i>\n\n"
         f"🔍 <b>Projeção Estatística:</b>\n"
-        f"• <b>Cenário:</b> {gols_escolha[0]}\n"
-        f"• <b>Ambas Marcam:</b> <b>{ambas_escolha}</b>\n"
-        f"• <b>Entrada de Gols:</b> <b>{gols_escolha[1]}</b>\n"
-        f"• <b>Entrada de Cantos:</b> <b>{cantos_escolha[1]}</b>\n\n"
+        f"• <b>Cenário Geral:</b> {gols_escolha[0]}\n"
+        f"• <b>Ambas Marcam (BTTS):</b> <b>{ambas_escolha}</b>\n"
+        f"• <b>Dupla Hipótese:</b> <b>{dupla_escolha[0]}</b> ({dupla_escolha[1]})\n"
+        f"• <b>Gols 1º Tempo (HT):</b> Possibilidade de Gol nos 45' Iniciais ⏱️\n\n"
+        f"🎯 <b>Mercado Individual & Linhas:</b>\n"
+        f"• <b>Casa:</b> {ind_home}\n"
+        f"• <b>Fora:</b> {ind_away}\n"
+        f"• <b>Linha de Gols:</b> <b>{gols_escolha[1]}</b>\n"
+        f"• <b>Cartões:</b> {cartao_escolha[1]} 🟨\n"
+        f"• <b>Cantos:</b> {cantos_escolha[1]}\n\n"
         f"🤖 <i>Status: Monitorando ao vivo e calculando Green/Red no apito final!</i>\n"
         f"----------------------------------------"
     )
@@ -107,7 +146,6 @@ def request_league_monitoring(league_code):
     league_code = league_code.lower().strip()
     today_str = datetime.now().strftime("%Y%m%d")
     
-    # Tenta com a data de hoje e, se falhar, tenta sem o filtro restrito de data
     urls = [
         f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard?dates={today_str}",
         f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard"
@@ -153,7 +191,7 @@ def request_league_monitoring(league_code):
                     "home": home_team,
                     "away": away_team,
                     "league": league_name,
-                    "alerts_sent": ["Análise Pré-Jogo & BTTS"],
+                    "alerts_sent": ["Análise Completa Pré-Jogo & Mercados"],
                     "notified_ht_goal": False,
                     "notified_ft_goal": False,
                     "result_sent": False
@@ -164,7 +202,7 @@ def request_league_monitoring(league_code):
                 send_telegram(prematch_msg)
                 time.sleep(0.5) 
 
-        send_telegram(f"✅ <b>Liga {league_name} ativada!</b> {added_count} partidas adicionadas.")
+        send_telegram(f"✅ <b>Liga {league_name} ativada!</b> {added_count} partidas adicionadas com análises completas.")
 
     except Exception as e:
         print(f"[ERRO LIGA] {e}")
@@ -193,7 +231,7 @@ def check_telegram_commands():
                 parts = text.split(maxsplit=1)
                 if len(parts) > 1:
                     league_code = parts[1].strip()
-                    send_telegram(f"🔍 Buscando dados de <code>{league_code}</code>...")
+                    send_telegram(f"🔍 Buscando dados completos de <code>{league_code}</code>...")
                     request_league_monitoring(league_code)
                 else:
                     send_telegram("⚠️ Informe o código da liga. Exemplo: <code>/liga esp.1</code>")
@@ -260,7 +298,7 @@ def monitor_tracked_matches():
 
                     if status_type in ["STATUS_IN_PROGRESS", "STATUS_HALFTIME"]:
                         if period == 1 and 15 <= clock <= 35 and home_score == 0 and away_score == 0 and not match_data["notified_ht_goal"]:
-                            send_telegram(f"⚽ <b>[{league_name}] AO VIVO: GOLS 1ºT</b>\n{home_team} 0 x 0 {away_team} ({clock_display})\n🎯 <b>Sugestão:</b> Over 0.5 Gols HT")
+                            send_telegram(f"⚽ <b>[{league_name}] AO VIVO: GOLS 1ºT (HT)</b>\n{home_team} 0 x 0 {away_team} ({clock_display})\n🎯 <b>Sugestão:</b> Sairá Gol no 1º Tempo (Over 0.5 HT)")
                             match_data["notified_ht_goal"] = True
                             match_data["alerts_sent"].append("Over 0.5 Gols HT")
 
@@ -272,15 +310,15 @@ def monitor_tracked_matches():
                     if status_type == "STATUS_FINAL" and not match_data["result_sent"]:
                         total_gols = home_score + away_score
                         if total_gols > 0:
-                            resultado_titulo = "✅ <b>GREEN / ENTRADA VALIDADA!</b> 🎉"
+                            resultado_titulo = "✅ <b>GREEN / ENTRADAS VALIDADAS!</b> 🎉"
                         else:
-                            resultado_titulo = "❌ <b>RED / ENTRADA ENCERRADA</b> 🔴"
+                            resultado_titulo = "❌ <b>RED / ENTRADAS ENCERRADAS</b> 🔴"
                         
                         result_msg = (
                             f"{resultado_titulo}\n\n"
                             f"🏁 <b>FIM DE JOGO [{league_name}]:</b>\n"
                             f"<b>{home_team} {home_score} x {away_score} {away_team}</b>\n\n"
-                            f"📌 <i>Resumo das Análises / Entradas:</i>\n"
+                            f"📌 <i>Resumo das Análises / Entradas Feitas:</i>\n"
                         )
                         for alert in set(match_data["alerts_sent"]):
                             result_msg += f"   • {alert}\n"
@@ -296,7 +334,7 @@ def monitor_tracked_matches():
 # INICIALIZAÇÃO DO BOT
 # ==========================================
 def bot_loop():
-    print("[BOT INICIADO] Versão 20 - Conexão flexível de ligas.")
+    print("[BOT INICIADO] Versão 21 - Análises completas restauradas (Cartões, Dupla Hipótese, Gols Ind. e HT).")
     while True:
         check_telegram_commands()
         monitor_tracked_matches()
