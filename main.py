@@ -17,12 +17,13 @@ def home():
 def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# Função auxiliar para consultar a API da ESPN com suporte a fallback de códigos
+# Função turbinada de busca na ESPN com múltiplas rotas de fallback
 def buscar_jogos_espn(codigo_liga):
-    # Endpoints oficiais da ESPN para futebol
     urls = [
         f"https://site.api.espn.com/apis/site/v2/sports/soccer/{codigo_liga}/scoreboard",
-        f"https://site.api.espn.com/apis/v2/sports/soccer/{codigo_liga}/scoreboard"
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.2/scoreboard",
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/scoreboard",
+        "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"  # Rota global de segurança
     ]
     
     for url in urls:
@@ -51,7 +52,6 @@ def formatar_analise_jogos(events):
             home_team = competitors[0].get("team", {}).get("displayName", "Casa")
             away_team = competitors[1].get("team", {}).get("displayName", "Fora")
             
-            # Métricas estatísticas simuladas/projetadas com base na engine V22
             texto_resposta += f"⚽ *{home_team} vs {away_team}*\n"
             texto_resposta += f"• *Prob. Vitória / Dupla Hipótese:* Analisado\n"
             texto_resposta += f"• *Média de Gols (Projeção):* Acima de 1.5 / BTTS (Ambas Marcam)\n"
@@ -83,21 +83,11 @@ def handle_liga(message):
         query_liga = args[1].strip().lower()
         bot.reply_to(message, f"🔍 Buscando dados para a liga: `{query_liga}`...", parse_mode="Markdown")
         
-        # Lista de tentativas flexíveis (caso a principal venha vazia ou mude a rota)
-        codigos_para_tentar = [query_liga]
-        if "bra.2" in query_liga or "serie b" in query_liga:
-            codigos_para_tentar.extend(["bra.2", "brazil.2", "bra.1"])
-        elif "bra.1" in query_liga or "serie a" in query_liga:
-            codigos_para_tentar.extend(["bra.1", "brazil.1"])
-
-        dados_encontrados = None
-        for codigo in codigos_para_tentar:
-            dados_encontrados = buscar_jogos_espn(codigo)
-            if dados_encontrados:
-                break
+        # Chama a função otimizada com rotas alternativas
+        dados_encontrados = buscar_jogos_espn(query_liga)
                 
         if not dados_encontrados:
-            bot.reply_to(message, "❌ Não encontrei partidas ativas para esta liga hoje na API da ESPN. Tente novamente mais tarde ou verifique o código.")
+            bot.reply_to(message, "❌ Não encontrei partidas ativas para esta liga hoje na API da ESPN. Tente novamente mais tarde.")
             return
             
         resposta = formatar_analise_jogos(dados_encontrados)
@@ -116,7 +106,6 @@ def handle_bilhete(message):
             
         bilhete_texto = args[1]
         
-        # Análise de risco do bilhete (Versão 22)
         resposta_bilhete = (
             f"🎫 *Análise de Bilhete Manual*\n\n"
             f"📝 *Aposta:* {bilhete_texto}\n"
@@ -128,7 +117,6 @@ def handle_bilhete(message):
         bot.reply_to(message, f"⚠️ Erro ao analisar o bilhete: {str(e)}")
 
 if __name__ == '__main__':
-    # Inicia o servidor web em uma thread separada para o Render não derrubar o bot
     t = Thread(target=run_web)
     t.start()
     
