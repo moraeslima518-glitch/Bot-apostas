@@ -4,6 +4,7 @@ import telebot
 from flask import Flask
 from threading import Thread
 import time
+from datetime import datetime
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "SEU_TOKEN_AQUI")
 bot = telebot.TeleBot(TOKEN)
@@ -12,35 +13,36 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot Analyst Pro V22 Rodando com Sucesso (Pré-jogo + Bilhetes + Ao Vivo)!"
+    return "Bot Analyst Pro V23 - Jogos do Dia Automatizados Rodando com Sucesso!"
 
 def run_web():
     app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
 # ==========================================
-# 1. FUNÇÃO DE BUSCA TURBINADA (COM ROTA ARGENTINA CORRIGIDA)
+# 1. FUNÇÃO DE BUSCA COM DATA AUTOMÁTICA DE HOJE
 # ==========================================
 def buscar_jogos_espn(query):
     query_limpa = query.strip().lower()
+    
+    # Pega automaticamente a data de hoje no formato exigido pela API (AAAAMMDD)
+    data_hoje = datetime.now().strftime("%Y%m%d")
     
     urls_a_testar = []
     
     if "arg" in query_limpa or "argentina" in query_limpa:
         urls_a_testar = [
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/arg.1/scoreboard",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/arg.copa_liga/scoreboard",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/arg.1/scoreboard?dates={data_hoje}",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard?dates={data_hoje}"
         ]
     elif "ksa" in query_limpa or "arabia" in query_limpa or "saudita" in query_limpa:
         urls_a_testar = [
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.1/scoreboard",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.pro/scoreboard",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/ksa.1/scoreboard?dates={data_hoje}",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard?dates={data_hoje}"
         ]
     else:
         urls_a_testar = [
-            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query_limpa}/scoreboard",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/{query_limpa}/scoreboard?dates={data_hoje}",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard?dates={data_hoje}"
         ]
     
     eventos_encontrados = []
@@ -51,14 +53,13 @@ def buscar_jogos_espn(query):
                 data = response.json()
                 events = data.get("events", [])
                 if events:
-                    # Se for busca específica de liga e encontrou eventos, retorna direto
                     if query_limpa in url and len(events) > 0:
                         return events
                     eventos_encontrados.extend(events)
         except Exception:
             continue
             
-    # Se testou as rotas específicas e caiu no global, filtramos se for Argentina ou retornamos os eventos
+    # Filtro de segurança para ligas específicas caso caia no feed global
     if ("arg" in query_limpa or "argentina" in query_limpa) and eventos_encontrados:
         filtrados_arg = []
         for event in eventos_encontrados:
@@ -72,7 +73,7 @@ def buscar_jogos_espn(query):
     return eventos_encontrados
 
 # ==========================================
-# 2. ANÁLISE INDIVIDUALIZADA (MANTIDA)
+# 2. ANÁLISE INDIVIDUALIZADA
 # ==========================================
 def gerar_analise_individual(home, away):
     hash_partida = sum(ord(c) for c in home + away)
@@ -110,7 +111,7 @@ def gerar_analise_individual(home, away):
     return cenarios[hash_partida % len(cenarios)]
 
 def formatar_analise_jogos(events):
-    texto_resposta = "📊 *Análise Individualizada de Partidas* 📊\n\n"
+    texto_resposta = "📊 *Análise Individualizada de Partidas (Jogos de Hoje)* 📊\n\n"
     
     for event in events:
         try:
@@ -134,7 +135,6 @@ def formatar_analise_jogos(events):
             texto_resposta += f"• *Escanteios (Cantos):* {analise['cantos']}\n"
             texto_resposta += f"• *Cartões:* {analise['cartoes']}\n"
             texto_resposta += f"• *Palpite Principal:* 🏆 *{analise['destaque']}*\n"
-            texto_resposta += f"🤖 *Status:* Análise personalizada gerada com sucesso.\n"
             texto_resposta += "----------------------------------------\n"
         except Exception:
             continue
@@ -142,12 +142,13 @@ def formatar_analise_jogos(events):
     return texto_resposta
 
 # ==========================================
-# 3. MÓDULO DE VARREDURA AO VIVO (MANTIDO)
+# 3. MÓDULO DE VARREDURA AO VIVO
 # ==========================================
 def varredura_jogos_ao_vivo():
     while True:
         try:
-            url = "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+            data_hoje = datetime.now().strftime("%Y%m%d")
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard?dates={data_hoje}"
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 data = response.json()
@@ -164,16 +165,15 @@ def varredura_jogos_ao_vivo():
         time.sleep(300)
 
 # ==========================================
-# 4. COMANDOS DO TELEGRAM (TODOS PRESERVADOS)
+# 4. COMANDOS DO TELEGRAM
 # ==========================================
 @bot.message_handler(commands=['start', 'ajuda'])
 def send_welcome(message):
     ajuda_texto = (
-        "🤖 *Bem-vindo ao Bot Analyst Pro V22*\n\n"
+        "🤖 *Bot Analyst Pro - Estatísticas & Jogos do Dia*\n\n"
         "Comandos disponíveis:\n"
-        "👉 `/liga [codigo]` - Analisa cada jogo individualmente (Ex: `/liga argentina`, `/liga ksa.1`, `/liga bra.2`)\n"
-        "👉 `/bilhete [sua aposta]` - Processa e faz risk assessment de bilhetes manuais\n"
-        "👉 `/aovivo` - Consulta rápida de partidas rolando no momento com radar tático\n"
+        "👉 `/liga [codigo]` - Analisa os jogos de hoje da liga (Ex: `/liga argentina`, `/liga eng.1`, `/liga bra.1`)\n"
+        "👉 `/aovivo` - Consulta rápida de partidas rolando no momento\n"
     )
     bot.reply_to(message, ajuda_texto, parse_mode="Markdown")
 
@@ -182,16 +182,16 @@ def handle_liga(message):
     try:
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
-            bot.reply_to(message, "⚠️ Use o formato correto, ex: `/liga argentina` ou `/liga ksa.1`", parse_mode="Markdown")
+            bot.reply_to(message, "⚠️ Use o formato correto, ex: `/liga argentina` ou `/liga eng.1`", parse_mode="Markdown")
             return
         
         query_liga = args[1].strip().lower()
-        bot.reply_to(message, f"🔍 Gerando análises individuais para a liga: `{query_liga}`...", parse_mode="Markdown")
+        bot.reply_to(message, f"🔍 Buscando jogos de hoje e gerando análises para: `{query_liga}`...", parse_mode="Markdown")
         
         dados_encontrados = buscar_jogos_espn(query_liga)
                 
         if not dados_encontrados:
-            bot.reply_to(message, "❌ Não encontrei partidas ativas para esta liga hoje na API da ESPN. Tente novamente mais tarde.", parse_mode="Markdown")
+            bot.reply_to(message, "❌ Não encontrei partidas agendadas para esta liga **hoje**. Verifique se há jogos na data atual.", parse_mode="Markdown")
             return
             
         resposta = formatar_analise_jogos(dados_encontrados)
@@ -200,31 +200,12 @@ def handle_liga(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ Erro ao processar a liga: {str(e)}", parse_mode="Markdown")
 
-@bot.message_handler(commands=['bilhete'])
-def handle_bilhete(message):
-    try:
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            bot.reply_to(message, "⚠️ Envie os detalhes da sua aposta. Ex: `/bilhete Flamengo para vencer e mais de 1.5 gols`", parse_mode="Markdown")
-            return
-            
-        bilhete_texto = args[1]
-        
-        resposta_bilhete = (
-            f"🎫 *Análise de Bilhete Manual*\n\n"
-            f"📝 *Aposta:* {bilhete_texto}\n"
-            f"📈 *Status de Risco:* Moderado/Favorável\n"
-            f"💡 *Revisão Estatística:* Projeções de cartões e cantos validadas para este bilhete."
-        )
-        bot.reply_to(message, resposta_bilhete, parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"⚠️ Erro ao analisar o bilhete: {str(e)}", parse_mode="Markdown")
-
 @bot.message_handler(commands=['aovivo'])
 def handle_aovivo(message):
     try:
-        bot.reply_to(message, "📡 *Varredura de Radar Ao Vivo iniciada... Buscando jogos em andamento.*", parse_mode="Markdown")
-        url = "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard"
+        bot.reply_to(message, "📡 *Varredura de Radar Ao Vivo iniciada... Buscando jogos de hoje em andamento.*", parse_mode="Markdown")
+        data_hoje = datetime.now().strftime("%Y%m%d")
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboard?dates={data_hoje}"
         response = requests.get(url, timeout=10)
         
         if response.status_code == 200:
@@ -238,7 +219,7 @@ def handle_aovivo(message):
                     jogos_ao_vivo.append(event)
             
             if not jogos_ao_vivo:
-                bot.reply_to(message, "⏳ Não há partidas de futebol rolando ao vivo na API da ESPN neste exato momento.", parse_mode="Markdown")
+                bot.reply_to(message, "⏳ Não há partidas de futebol rolando ao vivo neste exato momento.", parse_mode="Markdown")
                 return
                 
             resposta_vivo = "🔴 *Radar de Partidas Ao Vivo* 🔴\n\n"
@@ -270,5 +251,5 @@ if __name__ == '__main__':
     t_live = Thread(target=varredura_jogos_ao_vivo, daemon=True)
     t_live.start()
     
-    print("Bot rodando via polling com todas as funções integradas...")
+    print("Bot de Análise rodando com filtro de data automática...")
     bot.infinity_polling()
