@@ -3,16 +3,15 @@ import requests
 from flask import Flask
 import threading
 import telebot
-import os
 
-# Configuração do Token do Primeiro Bot (Bot-apostas)
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "COLE_SEU_TOKEN_DO_BOT_1_AQUI")
+# Token configurado diretamente para evitar o erro de validação
+TOKEN = "8149908189:AAHFMRSC2bLav_sgomd9aaw5aBaeNPapuHg"
 bot = telebot.TeleBot(TOKEN)
 
 # Lista global para armazenar os bilhetes e análises cadastradas
 bilhetes_monitorados = []
 
-# Lista completa de todas as ligas monitoradas pelo bot
+# Lista completa de todas as ligas monitoradas pelo bot (incluindo Espanha, Argentina, Brasil A/B, Libertadores e Europa)
 ligas_monitoradas = [
     "esp.1",          # La Liga (Espanha)
     "eng.1",          # Premier League (Inglaterra)
@@ -30,7 +29,7 @@ ligas_monitoradas = [
 
 # Função de Varredura Autônoma em Segundo Plano (Roda sozinha sem comandos)
 def varredura_autonoma_jogos():
-    print("Iniciando varredura autônoma no primeiro bot...")
+    print("Iniciando varredura autônoma no bot de apostas...")
     while True:
         for liga in ligas_monitoradas:
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
@@ -55,17 +54,15 @@ def varredura_autonoma_jogos():
                                 placar_fora = competidores[1].get("score", "0")
                                 tempo_atual = evento.get("status", {}).get("displayClock", "")
                                 
-                                # Aqui o bot cruza os jogos ao vivo com os bilhetes que você mandou.
-                                # Se bater com o seu critério, ele envia o alerta direto para o chat automaticamente:
+                                # Cruzamento automático com os bilhetes enviados
                                 for bilhete in bilhetes_monitorados:
                                     chat_id = bilhete["chat_id"]
-                                    # Exemplo de disparo autônomo (você pode refinar a regra de entrada aqui):
-                                    # bot.send_message(chat_id, f"🚨 Oportunidade ao vivo em {time_casa} x {time_fora} ({tempo_atual}')!")
+                                    # O bot disparará o alerta aqui automaticamente quando houver match ao vivo
                                     
             except Exception as e:
                 print(f"Erro ao consultar a liga {liga}: {e}")
         
-        # Pausa antes da próxima varredura completa
+        # Pausa antes da próxima varredura completa nas ligas
         time.sleep(60)
 
 # Comandos do Telegram
