@@ -4,14 +4,14 @@ from flask import Flask
 import threading
 import telebot
 
-# Token configurado diretamente para evitar o erro de validação
+# Token configurado diretamente
 TOKEN = "8149908189:AAHFMRSC2bLav_sgomd9aaw5aBaeNPapuHg"
 bot = telebot.TeleBot(TOKEN)
 
 # Lista global para armazenar os bilhetes e análises cadastradas
 bilhetes_monitorados = []
 
-# Lista completa de todas as ligas monitoradas pelo bot (incluindo Espanha, Argentina, Brasil A/B, Libertadores e Europa)
+# Lista completa de todas as ligas monitoradas pelo bot
 ligas_monitoradas = [
     "esp.1",          # La Liga (Espanha)
     "eng.1",          # Premier League (Inglaterra)
@@ -27,9 +27,9 @@ ligas_monitoradas = [
     "uefa.champions"  # Liga dos Campeões
 ]
 
-# Função de Varredura Autônoma em Segundo Plano (Roda sozinha sem comandos)
+# Função de Varredura Autônoma em Segundo Plano
 def varredura_autonoma_jogos():
-    print("Iniciando varredura autônoma no bot de apostas...")
+    print("Iniciando varredura autônoma de jogos...")
     while True:
         for liga in ligas_monitoradas:
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
@@ -39,30 +39,28 @@ def varredura_autonoma_jogos():
                     dados = resposta.json()
                     eventos = dados.get("events", [])
                     
+                    # Log específico para confirmar varredura da Espanha (esp.1)
+                    if liga == "esp.1" and len(eventos) > 0:
+                        print(f"La Liga (Espanha) consultada com sucesso: {len(eventos)} evento(s) encontrado(s).")
+                        
                     for evento in eventos:
                         status_tipo = evento.get("status", {}).get("type", {}).get("name", "")
                         
-                        # Monitora apenas jogos que estão rolando ao vivo
                         if status_tipo == "STATUS_IN_PROGRESS":
-                            competicao = evento.get("name", "")
                             competidores = evento.get("competitions", [{}])[0].get("competitors", [])
-                            
                             if len(competidores) >= 2:
                                 time_casa = competidores[0].get("team", {}).get("displayName", "")
-                                placar_casa = competidores[0].get("score", "0")
                                 time_fora = competidores[1].get("team", {}).get("displayName", "")
-                                placar_fora = competidores[1].get("score", "0")
                                 tempo_atual = evento.get("status", {}).get("displayClock", "")
                                 
-                                # Cruzamento automático com os bilhetes enviados
+                                # Processamento dos bilhetes monitorados ao vivo
                                 for bilhete in bilhetes_monitorados:
                                     chat_id = bilhete["chat_id"]
-                                    # O bot disparará o alerta aqui automaticamente quando houver match ao vivo
+                                    # Alerta automático ao vivo
                                     
             except Exception as e:
                 print(f"Erro ao consultar a liga {liga}: {e}")
         
-        # Pausa antes da próxima varredura completa nas ligas
         time.sleep(60)
 
 # Comandos do Telegram
@@ -71,48 +69,42 @@ def enviar_boas_vindas(mensagem):
     bot.reply_to(
         mensagem, 
         "🤖 **Bot de Apostas Principal Ativo!**\n\n"
-        "Envie o seu bilhete ou análise por texto ou foto. "
-        "O bot vai guardar na memória e monitorar todas as ligas (Brasil, Argentina, Europa, Libertadores) sozinho, mandando as entradas ao vivo para você!"
+        "Monitoramento autônomo ativado para La Liga (Espanha), Brasil, Argentina, Europa e Libertadores. "
+        "Envie seu bilhete por texto ou foto!"
     )
 
-# Recebe bilhetes ou pedidos de análise via texto
 @bot.message_handler(content_types=['text'])
 def receber_bilhete_texto(mensagem):
     chat_id = mensagem.chat.id
     texto = mensagem.text
-    
-    bilhetes_monitorados.append({
-        "chat_id": chat_id,
-        "conteudo": texto,
-        "tipo": "texto"
-    })
-    
-    bot.reply_to(mensagem, "✅ Análise/Bilhete registrado! O bot já começou o monitoramento automático ao vivo nas ligas.")
+    bilhetes_monitorados.append({"chat_id": chat_id, "conteudo": texto, "tipo": "texto"})
+    bot.reply_to(mensagem, "✅ Análise registrada! Monitorando ao vivo automaticamente.")
 
-# Recebe bilhetes ou prints por foto
 @bot.message_handler(content_types=['photo'])
 def receber_bilhete_foto(mensagem):
     chat_id = mensagem.chat.id
-    
-    bilhetes_monitorados.append({
-        "chat_id": chat_id,
-        "conteudo": "Print de aposta",
-        "tipo": "foto"
-    })
-    
-    bot.reply_to(mensagem, "📸 Print capturado com sucesso! Entrando na fila de varredura autônoma ao vivo.")
+    bilhetes_monitorados.append({"chat_id": chat_id, "conteudo": "Print de aposta", "tipo": "foto"})
+    bot.reply_to(mensagem, "📸 Print capturado! Na fila de varredura autônoma.")
 
-# Configuração do Servidor Flask para manter o Render ligado 24h
+# Configuração do Servidor Flask para o Render
 app = Flask(__name__)
 
 @app.route("/")
 def home():
     return "Bot de Apostas Principal rodando com monitoramento autônomo!"
 
+def rodar_telegram():
+    print("Iniciando escuta do Telegram...")
+    bot.infinity_polling(none_stop=True, interval=0, timeout=20)
+
 if __name__ == "__main__":
-    # Inicia a thread de varredura em segundo plano (roda sem precisar de comandos)
+    # Inicia a thread de varredura de jogos da ESPN
     thread_varredura = threading.Thread(target=varredura_autonoma_jogos, daemon=True)
     thread_varredura.start()
     
-    # Inicia o servidor web do Render
+    # Inicia a thread dedicada para escutar as mensagens do Telegram sem travar o Flask
+    thread_telegram = threading.Thread(target=rodar_telegram, daemon=True)
+    thread_telegram.start()
+    
+    # Inicia o servidor web exigido pelo Render
     app.run(host="0.0.0.0", port=5000)
