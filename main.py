@@ -12,7 +12,7 @@ bot = telebot.TeleBot(TOKEN)
 # Lista global para armazenar os bilhetes e análises cadastradas
 bilhetes_monitorados = []
 
-# Lista completa de todas las ligas e copas monitoradas pelo bot
+# Lista completa de todas as ligas e copas monitoradas pelo bot
 ligas_monitoradas = [
     "conmebol.libertadores", # Copa Libertadores
     "conmebol.sudamericana",  # Copa Sul-Americana
@@ -55,8 +55,9 @@ def calcular_estatisticas_por_times(time_casa, time_fora):
 def varredura_autonoma_jogos():
     print("Iniciando varredura com todas as ligas e torneios...")
     while True:
+        data_hoje = datetime.now().strftime("%Y%m%d")
         for liga in ligas_monitoradas:
-            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard?dates={data_hoje}"
             try:
                 resposta = requests.get(url, timeout=10)
                 if resposta.status_code == 200:
@@ -179,10 +180,18 @@ def enviar_boas_vindas(mensagem):
         mensagem, 
         "🤖 **Bot do Tico Ativo!**\n\n"
         "• Digite o nome de qualquer time do dia para ver o raio-x instantâneo.\n"
+        "• Use /ligas para ver as competições monitoradas.\n"
         "• O radar autônomo monitora todas as ligas e copas em segundo plano."
     )
 
-# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO (Busca em todos os jogos da grade do dia)
+@bot.message_handler(commands=['ligas'])
+def listar_ligas(mensagem):
+    texto_ligas = "🏆 **Ligas e Copas Monitoradas:**\n\n"
+    for l in ligas_monitoradas:
+        texto_ligas += f"• `{l.upper()}`\n"
+    bot.reply_to(mensagem, texto_ligas)
+
+# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO (Busca na grade do dia com parâmetro de data)
 @bot.message_handler(content_types=['text'])
 def analisar_bilhete_texto(mensagem):
     texto_usuario = mensagem.text.strip()
@@ -192,11 +201,13 @@ def analisar_bilhete_texto(mensagem):
         return
 
     chat_id = mensagem.chat.id
-    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade do dia...")
+    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade de hoje...")
 
+    data_hoje = datetime.now().strftime("%Y%m%d")
     jogo_encontrado = None
+
     for liga in ligas_monitoradas:
-        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard?dates={data_hoje}"
         try:
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
@@ -207,12 +218,13 @@ def analisar_bilhete_texto(mensagem):
                         t_casa = comps[0].get("team", {}).get("displayName", "")
                         t_fora = comps[1].get("team", {}).get("displayName", "")
                         
-                        # Procura se o texto digitado bate com o time da casa ou de fora na grade do dia
+                        # Procura se o texto digitado bate com o time da casa ou de fora
                         if texto_usuario.lower() in t_casa.lower() or texto_usuario.lower() in t_fora.lower():
                             jogo_encontrado = (t_casa, t_fora, liga, ev)
                             break
-        except:
-            pass
+        except Exception as e:
+            print(f"Erro na busca manual da liga {liga}: {e}")
+            
         if jogo_encontrado:
             break
 
@@ -238,7 +250,7 @@ def analisar_bilhete_texto(mensagem):
         bot.reply_to(
             mensagem, 
             f"📝 **Bilhete Registrado!**\n\n"
-            f"Não encontrei esse jogo na grade de hoje agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
+            f"Não achei esse time na grade de hoje agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
         )
 
 @bot.message_handler(content_types=['photo'])
@@ -254,7 +266,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot rodando com Libertadores e todas as principais ligas!"
+    return "Bot rodando com Libertadores e ligas do dia!"
 
 def rodar_telegram():
     print("Iniciando escuta...")
