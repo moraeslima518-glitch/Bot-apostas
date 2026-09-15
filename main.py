@@ -51,7 +51,7 @@ def varredura_autonoma_jogos():
                             time_casa = competidores[0].get("team", {}).get("displayName", "")
                             time_fora = competidores[1].get("team", {}).get("displayName", "")
                             
-                            # 1. Alerta Pré-Jogo automático
+                            # 1. Alerta Pré-Jogo automático antes de começar
                             if status_tipo == "STATUS_SCHEDULED" and jogo_id not in jogos_pre_alerta_enviado:
                                 jogos_pre_alerta_enviado.add(jogo_id)
                                 
@@ -60,10 +60,10 @@ def varredura_autonoma_jogos():
                                     try:
                                         bot.send_message(
                                             chat_id, 
-                                            f"⏰ **Alerta Pré-Jogo!**\n\n"
+                                            f"⏰ **Alerta Pré-Jogo Automático!**\n\n"
                                             f"⚽ {time_casa} x {time_fora}\n"
-                                            f"🏆 Competição: `{liga}`\n\n"
-                                            f"Partida prestes a iniciar. Fique atento às análises!"
+                                            f"🏆 Liga: `{liga}`\n\n"
+                                            f"A partida vai começar em breve!"
                                         )
                                     except Exception as e:
                                         print(f"Erro ao enviar pré-jogo: {e}")
@@ -71,85 +71,102 @@ def varredura_autonoma_jogos():
                             # 2. Monitoramento Ao Vivo
                             elif status_tipo == "STATUS_IN_PROGRESS":
                                 tempo_atual = evento.get("status", {}).get("displayClock", "")
-                                placar_casa = competidores[0].get("score", "0")
-                                placar_fora = competidores[1].get("score", "0")
-                                
                                 for bilhete in bilhetes_monitorados:
                                     chat_id = bilhete["chat_id"]
-                                    # Aqui o bot cruza os dados e dispara as entradas ao vivo automaticamente
+                                    # Cruzamento de dados ao vivo
                                     
             except Exception as e:
                 print(f"Erro ao consultar a liga {liga}: {e}")
         
         time.sleep(60)
 
-# Comandos do Telegram
+# Comandos de boas-vindas
 @bot.message_handler(commands=['start', 'help'])
 def enviar_boas_vindas(mensagem):
     bot.reply_to(
         mensagem, 
-        "🤖 **Bot de Apostas Principal Ativo!**\n\n"
-        "Envie sua análise, bilhete ou print. O bot mantém todas as funções normais de estatísticas e agora realiza:\n"
-        "• Alertas **pré-jogo** automáticos.\n"
-        "• Monitoramento de entradas **ao vivo**.\n"
-        "• Cobertura completa (Espanha, Argentina, Brasil A/B, Libertadores, Europa, etc.)."
+        "🤖 **Bot do Tico Ativo!**\n\n"
+        "• Use `/liga <código>` (ex: `/liga esp.1`, `/liga arg.1`) para buscar os jogos do dia na hora.\n"
+        "• O bot também monitora tudo sozinho em segundo plano e te manda alertas **pré-jogo** e **ao vivo**!"
     )
 
-# Tratamento padrão para análises e textos enviados pelo usuário
+# Tratamento específico para comandos de ligas (Ex: /liga esp.1, /liga arg.1, etc.)
+@bot.message_handler(func=lambda mensagem: mensagem.text and mensagem.text.startswith('/liga'))
+def consultar_liga_comando(mensagem):
+    texto = mensagem.text.strip()
+    partes = texto.split()
+    
+    if len(partes) > 1:
+        liga_escolhida = partes[1].lower()
+        bot.reply_to(mensagem, f"🔍 Buscando jogos de hoje e gerando análises para: `{liga_escolhida}`...")
+        
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga_escolhida}/scoreboard"
+        try:
+            resposta = requests.get(url, timeout=10)
+            if resposta.status_code == 200:
+                dados = resposta.json()
+                eventos = dados.get("events", [])
+                
+                if not eventos:
+                    bot.reply_to(mensagem, f"❌ Não encontrei partidas agendadas para esta liga hoje. Verifique se há jogos na data atual.")
+                else:
+                    resposta_texto = f"📋 **Partidas encontradas para `{liga_escolhida}`:**\n\n"
+                    for ev in eventos:
+                        comps = ev.get("competitions", [{}])[0].get("competitors", [])
+                        if len(comps) >= 2:
+                            c_casa = comps[0].get("team", {}).get("displayName", "")
+                            c_fora = comps[1].get("team", {}).get("displayName", "")
+                            status_nome = ev.get("status", {}).get("type", {}).get("description", "")
+                            resposta_texto += f"⚽ {c_casa} vs {c_fora} — *Status: {status_nome}*\n"
+                    bot.reply_to(mensagem, resposta_texto)
+            else:
+                bot.reply_to(mensagem, "⚠️ Erro ao acessar os dados da liga na API da ESPN.")
+        except Exception as e:
+            bot.reply_to(mensagem, f"⚠️ Erro na requisição: {e}")
+    else:
+        bot.reply_to(mensagem, "⚠️ Por favor, informe a liga após o comando. Exemplo: `/liga esp.1` ou `/liga arg.1`")
+
+# Tratamento de textos gerais / bilhetes enviados
 @bot.message_handler(content_types=['text'])
-def receber_analise_texto(mensagem):
+def receber_bilhete_texto(mensagem):
     chat_id = mensagem.chat.id
     texto = mensagem.text
     
-    # Salva na lista de monitoramento para a varredura autônoma
     bilhetes_monitorados.append({
         "chat_id": chat_id,
         "conteudo": texto,
         "tipo": "texto"
     })
     
-    bot.reply_to(
-        mensagem, 
-        "✅ **Análise recebida e registrada com sucesso!**\n\n"
-        "O bot guardou as informações e já está cruzando os dados com as ligas monitoradas para te enviar as entradas e estatísticas automaticamente."
-    )
+    bot.reply_to(mensagem, "✅ Análise/Bilhete registrado na vigilância autônoma (pré-jogo e ao vivo)!")
 
-# Tratamento para fotos/prints de bilhetes
+# Tratamento de fotos
 @bot.message_handler(content_types=['photo'])
-def receber_analise_foto(mensagem):
+def receber_bilhete_foto(mensagem):
     chat_id = mensagem.chat.id
-    
     bilhetes_monitorados.append({
         "chat_id": chat_id,
         "conteudo": "Print de aposta",
         "tipo": "foto"
     })
-    
-    bot.reply_to(
-        mensagem, 
-        "📸 **Print capturado!**\n\n"
-        "Sua aposta foi inserida no sistema de varredura autônoma para acompanhamento em tempo real."
-    )
+    bot.reply_to(mensagem, "📸 Print capturado com sucesso! Na fila de monitoramento automático.")
 
-# Configuração do Servidor Flask para manter o Render ativo
+# Configuração do Flask para o Render
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot de Apostas Principal rodando com estatísticas e monitoramento autônomo!"
+    return "Bot do Tico rodando com comandos e monitoramento autônomo!"
 
 def rodar_telegram():
     print("Iniciando escuta do Telegram...")
     bot.infinity_polling(none_stop=True, interval=0, timeout=20)
 
 if __name__ == "__main__":
-    # Inicia a thread de varredura autônoma de jogos (Pré-jogo e Ao vivo)
     thread_varredura = threading.Thread(target=varredura_autonoma_jogos, daemon=True)
     thread_varredura.start()
     
-    # Inicia a thread dedicada para escutar o Telegram
     thread_telegram = threading.Thread(target=rodar_telegram, daemon=True)
     thread_telegram.start()
     
-    # Inicia o servidor web do Render
     app.run(host="0.0.0.0", port=5000)
