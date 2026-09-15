@@ -55,9 +55,8 @@ def calcular_estatisticas_por_times(time_casa, time_fora):
 def varredura_autonoma_jogos():
     print("Iniciando varredura com todas as ligas e torneios...")
     while True:
-        data_hoje = datetime.now().strftime("%Y%m%d")
         for liga in ligas_monitoradas:
-            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard?dates={data_hoje}"
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
             try:
                 resposta = requests.get(url, timeout=10)
                 if resposta.status_code == 200:
@@ -179,19 +178,11 @@ def enviar_boas_vindas(mensagem):
     bot.reply_to(
         mensagem, 
         "🤖 **Bot do Tico Ativo!**\n\n"
-        "• Digite o nome de qualquer time do dia para ver o raio-x instantâneo.\n"
-        "• Use /ligas para ver as competições monitoradas.\n"
+        "• Digite o nome de qualquer time para ver o raio-x instantâneo.\n"
         "• O radar autônomo monitora todas as ligas e copas em segundo plano."
     )
 
-@bot.message_handler(commands=['ligas'])
-def listar_ligas(mensagem):
-    texto_ligas = "🏆 **Ligas e Copas Monitoradas:**\n\n"
-    for l in ligas_monitoradas:
-        texto_ligas += f"• `{l.upper()}`\n"
-    bot.reply_to(mensagem, texto_ligas)
-
-# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO (Busca na grade do dia com parâmetro de data)
+# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO (Código original restaurado)
 @bot.message_handler(content_types=['text'])
 def analisar_bilhete_texto(mensagem):
     texto_usuario = mensagem.text.strip()
@@ -201,13 +192,11 @@ def analisar_bilhete_texto(mensagem):
         return
 
     chat_id = mensagem.chat.id
-    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade de hoje...")
+    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade...")
 
-    data_hoje = datetime.now().strftime("%Y%m%d")
     jogo_encontrado = None
-
     for liga in ligas_monitoradas:
-        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard?dates={data_hoje}"
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
         try:
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
@@ -218,13 +207,11 @@ def analisar_bilhete_texto(mensagem):
                         t_casa = comps[0].get("team", {}).get("displayName", "")
                         t_fora = comps[1].get("team", {}).get("displayName", "")
                         
-                        # Procura se o texto digitado bate com o time da casa ou de fora
-                        if texto_usuario.lower() in t_casa.lower() or texto_usuario.lower() in t_fora.lower():
+                        if t_casa.lower() in texto_usuario.lower() or t_fora.lower() in texto_usuario.lower():
                             jogo_encontrado = (t_casa, t_fora, liga, ev)
                             break
-        except Exception as e:
-            print(f"Erro na busca manual da liga {liga}: {e}")
-            
+        except:
+            pass
         if jogo_encontrado:
             break
 
@@ -250,7 +237,7 @@ def analisar_bilhete_texto(mensagem):
         bot.reply_to(
             mensagem, 
             f"📝 **Bilhete Registrado!**\n\n"
-            f"Não achei esse time na grade de hoje agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
+            f"Não encontrei esse jogo ao vivo na grade agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
         )
 
 @bot.message_handler(content_types=['photo'])
@@ -266,7 +253,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot rodando com Libertadores e ligas do dia!"
+    return "Bot rodando com Libertadores e todas as principais ligas!"
 
 def rodar_telegram():
     print("Iniciando escuta...")
