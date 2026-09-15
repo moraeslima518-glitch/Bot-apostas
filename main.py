@@ -34,7 +34,7 @@ jogos_pre_alerta_enviado = set()
 def varredura_autonoma_jogos():
     print("Iniciando varredura autônoma (Pré-jogo e Ao Vivo)...")
     while True:
-        for liga inligas_monitoradas:
+        for liga in ligas_monitoradas:  # Correção do espaço aplicada aqui
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
             try:
                 resposta = requests.get(url, timeout=10)
@@ -53,10 +53,8 @@ def varredura_autonoma_jogos():
                             
                             # 1. DETECÇÃO PRÉ-JOGO (Envia alerta antes da bola rolar)
                             if status_tipo == "STATUS_SCHEDULED" and jogo_id not in jogos_pre_alerta_enviado:
-                                # Marca como avisado para não mandar o mesmo alerta repetidamente
                                 jogos_pre_alerta_enviado.add(jogo_id)
                                 
-                                # Dispara o alerta pré-jogo para todos os bilhetes/usuários cadastrados
                                 for bilhete in bilhetes_monitorados:
                                     chat_id = bilhete["chat_id"]
                                     try:
@@ -77,10 +75,9 @@ def varredura_autonoma_jogos():
                                 placar_casa = competidores[0].get("score", "0")
                                 placar_fora = competidores[1].get("score", "0")
                                 
-                                # Aqui processa os bilhetes e dispara as entradas ao vivo se bater com a regra
                                 for bilhete in bilhetes_monitorados:
                                     chat_id = bilhete["chat_id"]
-                                    # Lógica de cruzamento ao vivo já integrada
+                                    # Lógica de cruzamento ao vivo
                                     
             except Exception as e:
                 print(f"Erro ao consultar a liga {liga}: {e}")
@@ -125,13 +122,10 @@ def rodar_telegram():
     bot.infinity_polling(none_stop=True, interval=0, timeout=20)
 
 if __name__ == "__main__":
-    # Inicia a thread de varredura (Pré-jogo + Ao vivo)
     thread_varredura = threading.Thread(target=varredura_autonoma_jogos, daemon=True)
     thread_varredura.start()
     
-    # Inicia a thread do Telegram
     thread_telegram = threading.Thread(target=rodar_telegram, daemon=True)
     thread_telegram.start()
     
-    # Inicia o Flask
     app.run(host="0.0.0.0", port=5000)
