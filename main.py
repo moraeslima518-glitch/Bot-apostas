@@ -12,7 +12,7 @@ bot = telebot.TeleBot(TOKEN)
 # Lista global para armazenar os bilhetes e análises cadastradas
 bilhetes_monitorados = []
 
-# Lista completa de todas as ligas monitoradas pelo bot (Todas as principais + Sul-Americana e Libertadores)
+# Lista completa de todas as ligas e copas monitoradas pelo bot
 ligas_monitoradas = [
     "conmebol.libertadores", # Copa Libertadores
     "conmebol.sudamericana",  # Copa Sul-Americana
@@ -253,7 +253,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot rodando com todas as ligas e torneios!"
+    return "Bot rodando com Libertadores e todas as principais ligas!"
 
 def rodar_telegram():
     print("Iniciando escuta...")
