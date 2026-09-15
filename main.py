@@ -12,7 +12,7 @@ bot = telebot.TeleBot(TOKEN)
 # Lista global para armazenar os bilhetes e análises cadastradas
 bilhetes_monitorados = []
 
-# Lista completa de todas as ligas e copas monitoradas pelo bot
+# Lista completa de todas las ligas e copas monitoradas pelo bot
 ligas_monitoradas = [
     "conmebol.libertadores", # Copa Libertadores
     "conmebol.sudamericana",  # Copa Sul-Americana
@@ -178,11 +178,11 @@ def enviar_boas_vindas(mensagem):
     bot.reply_to(
         mensagem, 
         "🤖 **Bot do Tico Ativo!**\n\n"
-        "• Digite o nome de qualquer time para ver o raio-x instantâneo.\n"
+        "• Digite o nome de qualquer time do dia para ver o raio-x instantâneo.\n"
         "• O radar autônomo monitora todas as ligas e copas em segundo plano."
     )
 
-# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO
+# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO (Busca em todos os jogos da grade do dia)
 @bot.message_handler(content_types=['text'])
 def analisar_bilhete_texto(mensagem):
     texto_usuario = mensagem.text.strip()
@@ -192,7 +192,7 @@ def analisar_bilhete_texto(mensagem):
         return
 
     chat_id = mensagem.chat.id
-    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade...")
+    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade do dia...")
 
     jogo_encontrado = None
     for liga in ligas_monitoradas:
@@ -207,7 +207,8 @@ def analisar_bilhete_texto(mensagem):
                         t_casa = comps[0].get("team", {}).get("displayName", "")
                         t_fora = comps[1].get("team", {}).get("displayName", "")
                         
-                        if t_casa.lower() in texto_usuario.lower() or t_fora.lower() in texto_usuario.lower():
+                        # Procura se o texto digitado bate com o time da casa ou de fora na grade do dia
+                        if texto_usuario.lower() in t_casa.lower() or texto_usuario.lower() in t_fora.lower():
                             jogo_encontrado = (t_casa, t_fora, liga, ev)
                             break
         except:
@@ -237,7 +238,7 @@ def analisar_bilhete_texto(mensagem):
         bot.reply_to(
             mensagem, 
             f"📝 **Bilhete Registrado!**\n\n"
-            f"Não encontrei esse jogo ao vivo na grade agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
+            f"Não encontrei esse jogo na grade de hoje agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
         )
 
 @bot.message_handler(content_types=['photo'])
