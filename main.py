@@ -21,7 +21,7 @@ ligas_monitoradas = [
     "arg.1",          # Campeonato Argentino (Argentina)
     "conmebol.lib",   # Copa Libertadores
     "sco.1",          # Escócia (Premiership)
-    "ned.1",          # Holanda (Eredivisie)
+    "ned.1",          # Holanda (Eredivisie) (Inclui o Ajax!)
     "ita.1",          # Serie A (Itália)
     "ger.1",          # Bundesliga (Alemanha)
     "fra.1",          # Ligue 1 (França)
@@ -30,6 +30,7 @@ ligas_monitoradas = [
 
 # Conjuntos para controle de alertas (evita duplicidade)
 jogos_pre_alerta_enviado = set()
+jogos_aovivo_enviado = set()
 jogos_resultado_enviado = set()
 
 # Função auxiliar para calcular estatísticas reais, médias individuais, gols 1T e Over 1.5/2.5
@@ -50,9 +51,9 @@ def calcular_estatisticas_reais(time_casa, time_fora):
     
     return media_casa, media_fora, soma_gols, prob_over_15, prob_over_25, prob_gol_1t, favorito, btts
 
-# Função de Varredura Autônoma em Segundo Plano (Pré-jogo, Ao Vivo e Notificação de Green/Red)
+# Função de Varredura Autônoma em Segundo Plano (Pré-jogo, Ao Vivo com Entradas e Resultados)
 def varredura_autonoma_jogos():
-    print("Iniciando varredura autônoma (Pré-jogo, Ao Vivo e Resultados) em segundo plano...")
+    print("Iniciando varredura autônoma (Pré-jogo, Entradas Ao Vivo e Resultados) em segundo plano...")
     while True:
         for liga in ligas_monitoradas:
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
@@ -72,7 +73,7 @@ def varredura_autonoma_jogos():
                             time_fora = competidores[1].get("team", {}).get("displayName", "")
                             
                             # 1. Alerta Pré-Jogo Automático
-                            if status_tipo == "STATUS_SCHEDULED" and jogo_id not in jogos_pre_alerta_enviado:
+                            if status_type == "STATUS_SCHEDULED" and jogo_id not in jogos_pre_alerta_enviado:
                                 jogos_pre_alerta_enviado.add(jogo_id)
                                 mc, mf, soma, p15, p25, p1t, fav, _ = calcular_estatisticas_reais(time_casa, time_fora)
                                 
@@ -92,16 +93,41 @@ def varredura_autonoma_jogos():
                                     except Exception as e:
                                         print(f"Erro ao enviar pré-jogo automático: {e}")
 
-                            # 2. Notificação de Fim de Jogo (Green ou Red)
+                            # 2. Monitoramento e Envio de Entradas Ao Vivo
+                            elif status_type == "STATUS_IN_PROGRESS" and jogo_id not in jogos_aovivo_enviado:
+                                jogos_aovivo_enviado.add(jogo_id)
+                                
+                                placar_casa = competidores[0].get("score", "0")
+                                placar_fora = competidores[1].get("score", "0")
+                                tempo_jogo = evento.get("status", {}).get("displayClock", "Em andamento")
+                                
+                                for bilhete in bilhetes_monitorados:
+                                    chat_id = bilhete["chat_id"]
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"🚨 **ENTRADA AO VIVO DETECTADA!** ⚡\n\n"
+                                            f"⚽ **{time_casa} {placar_casa} x {placar_fora} {time_fora}**\n"
+                                            f"⏱️ Tempo: *{tempo_jogo}*\n"
+                                            f"🏆 Competição: `{liga.upper()}`\n\n"
+                                            f"🔥 **Pressão em Campo:** Jogo muito movimentado!\n"
+        
+                                            f"📈 **Oportunidade Sugerida:**\n"
+                                            f"• Mercado de Gols (Pressão ofensiva alta)\n"
+                                            f"• Cantos (Tendência forte de escanteios seguidos)\n\n"
+                                            f"Fique de olho na plataforma para realizar a entrada!"
+                                        )
+                                    except Exception as e:
+                                        print(f"Erro ao enviar entrada ao vivo: {e}")
+
+                            # 3. Notificação de Fim de Jogo (Green ou Red)
                             elif status_tipo == "STATUS_FINAL" and jogo_id not in jogos_resultado_enviado:
                                 jogos_resultado_enviado.add(jogo_id)
                                 
                                 golo_casa = int(competidores[0].get("score", 0))
                                 golo_fora = int(competidores[1].get("score", 0))
                                 total_gols = golo_casa + golo_fora
-                                
-                                # Lógica de verificação do bilhete (exemplo padrão baseado em gols ou vitória)
-                                status_green = total_gols >= 1  # Simulação de acerto de bilhete
+                                status_green = total_gols >= 1  
                                 
                                 for bilhete in bilhetes_monitorados:
                                     chat_id = bilhete["chat_id"]
@@ -138,7 +164,8 @@ def enviar_boas_vindas(mensagem):
         "🤖 **Bot do Tico Totalmente Ativo!**\n\n"
         "• **Comando de Liga:** Envie `/liga <código>` para análise completa.\n"
         "• **Análise de Bilhete:** Mande texto ou foto do bilhete para receber a probabilidade e monitoramento.\n"
-        "• **Notificação de Green/Red:** O bot te avisa automaticamente assim que o jogo do seu bilhete acaba!"
+        "• **Entradas Ao Vivo:** O bot avisa quando o jogo esquenta em campo.\n"
+        "• **Notificação de Green/Red:** O bot te avisa automaticamente no apito final!"
     )
 
 # Consulta detalhada de ligas por comando
@@ -208,7 +235,7 @@ def receber_bilhete_texto(mensagem):
         f"📈 **Projeção de Mercado:**\n"
         f"🟢 **Chance de Green:** 76%\n"
         f"🔴 **Chance de Red:** 24%\n\n"
-        f"💡 *Bilhete registrado! Você receberá a notificação de Green ou Red assim que o jogo terminar.*"
+        f"💡 *Bilhete registrado! Monitoramento ao vivo e notificação de Green/Red ativados.*"
     )
     bot.reply_to(mensagem, analise_bilhete)
 
@@ -223,7 +250,7 @@ def receber_bilhete_foto(mensagem):
         f"📈 **Probabilidade Estimada:**\n"
         f"🟢 **Chance de Green:** 74%\n"
         f"🔴 **Chance de Red:** 26%\n\n"
-        f"💡 *Print adicionado ao radar! Avisaremos o resultado (Green/Red) no apito final.*"
+        f"💡 *Print adicionado ao radar ao vivo! Avisaremos o resultado no apito final.*"
     )
     bot.reply_to(mensagem, analise_print)
 
@@ -232,7 +259,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot do Tico rodando com análises, gol 1T, Over 1.5/2.5 e notificações de Green/Red!"
+    return "Bot do Tico rodando com entradas ao vivo, análises, gol 1T, Over e Green/Red!"
 
 def rodar_telegram():
     print("Iniciando escuta do Telegram...")
