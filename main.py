@@ -1,15 +1,15 @@
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 import requests
 from flask import Flask
 import threading
 import telebot
 
-# Token configurado diretamente
+# Token do seu bot
 TOKEN = "8149908189:AAHFMRSC2bLav_sgomd9aaw5aBaeNPapuHg"
 bot = telebot.TeleBot(TOKEN)
 
-# Dicionário de ligas com nomes amigáveis
+# Ligas monitoradas
 ligas_monitoradas = {
     "conmebol.libertadores": "Copa Libertadores",
     "conmebol.sudamericana": "Copa Sul-Americana",
@@ -25,15 +25,16 @@ ligas_monitoradas = {
     "uefa.champions": "Liga dos Campeões"
 }
 
-# Conjuntos individuais para controle de alertas automáticos
+# Controle para não mandar o mesmo alerta duas vezes
 jogos_pre_alerta_enviado = set()
 jogos_gol_enviado = set()
 jogos_cantos_enviado = set()
 jogos_cartoes_enviado = set()
-jogos_resultado_enviado = set()
+
+# Armazena quem interagiu para receber os alertas automáticos
+chats_ativos = set()
 
 def limpar_markdown(texto):
-    """Remove caracteres que possam quebrar a formatação do Telegram"""
     if not texto:
         return ""
     return str(texto).replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
@@ -53,17 +54,23 @@ def calcular_estatisticas_por_times(time_casa, time_fora):
     proj_cartoes = int(3 + ((len(time_casa) + len(time_fora)) % 3))
     
     favorito = time_casa if media_casa >= media_fora else time_fora
-    ambos_marcam = "Sim (Alta)" if soma_gols >= 2.5 else "Moderado / Pouco Provável"
     
-    gol_1t = "Forte (Tendência de pressão inicial)" if media_casa > 1.2 else "Moderada"
-    gol_2t = "Altíssima (Gols no abafamento)" if soma_gols > 2.3 else "Normal"
-    chance_vermelho = "Atenção: Jogo tenso, risco moderado/alto de expulsão" if proj_cartoes >= 4 else "Baixo risco"
+    # Linhas de gols e ambas marcam
+    ambos_marcam = "Sim (Alta)" if soma_gols >= 2.5 else "Moderado / Pouco Provável"
+    mais_1_5 = "Mais de 1.5 gols (Favorável)" if soma_gols >= 1.6 else "Atenção (Baixa média)"
+    mais_2_5 = "Mais de 2.5 gols (Tendência forte)" if soma_gols >= 2.3 else "Menos de 2.5 gols (Jogo mais under)"
+    
+    gol_1t = "Forte pressão inicial" if media_casa > 1.2 else "Estudo no início"
+    gol_2t = "Altíssima (Gols no abafamento)" if soma_gols > 2.3 else "Ritmo normal"
+    chance_vermelho = "Atenção: Jogo tenso, risco de expulsão" if proj_cartoes >= 4 else "Baixo risco disciplinar"
     
     return {
         "media_casa": media_casa,
         "media_fora": media_fora,
         "soma_gols": soma_gols,
         "prob_gol": prob_gol,
+        "mais_1_5": mais_1_5,
+        "mais_2_5": mais_2_5,
         "proj_cantos": proj_cantos,
         "proj_cartoes": proj_cartoes,
         "favorito": favorito,
@@ -72,10 +79,6 @@ def calcular_estatisticas_por_times(time_casa, time_fora):
         "gol_2t": gol_2t,
         "chance_vermelho": chance_vermelho
     }
-
-# Varredura autônoma mandando pré-jogo e ao vivo para quem estiver interagindo com o bot
-# (Armazenamos os chat_ids dinamicamente de quem mandar /start ou buscar jogos)
-chats_ativos = set()
 
 def varredura_autonoma_jogos():
     print("Iniciando varredura autônoma de jogos...")
@@ -101,7 +104,7 @@ def varredura_autonoma_jogos():
                             
                             stats = calcular_estatisticas_por_times(time_casa, time_fora)
                             
-                            # 1. Alerta Pré-Jogo com Entradas e Análises Completas
+                            # Alerta Pré-Jogo
                             if status_tipo == "STATUS_SCHEDULED" and jogo_id not in jogos_pre_alerta_enviado:
                                 jogos_pre_alerta_enviado.add(jogo_id)
                                 for chat_id in chats_ativos:
@@ -111,18 +114,17 @@ def varredura_autonoma_jogos():
                                             f"⏰ **ENTRADA PRÉ-JOGO SUGERIDA**\n\n"
                                             f"⚽ `{time_casa} x {time_fora}`\n"
                                             f"🏆 `{nome_liga}`\n\n"
-                                            f"• **Time para Ganhar (Favorito):** {stats['favorito']}\n"
-                                            f"• **Probabilidade de Gols:** `{stats['prob_gol']}%`\n"
+                                            f"• **Time para Vencer (Favorito):** {stats['favorito']}\n"
                                             f"• **Ambos Marcam:** {stats['ambos_marcam']}\n"
-                                            f"• **Tendência 1º Tempo:** {stats['gol_1t']}\n"
-                                            f"• **Tendência 2º Tempo:** {stats['gol_2t']}\n"
-                                            f"• **Expectativa de Cantos:** `{stats['proj_cantos']}+ escanteios`\n"
-                                            f"• **Expectativa de Cartões:** `{stats['proj_cartoes']}+ cartões`"
+                                            f"• **Linha 1.5 Gols:** {stats['mais_1_5']}\n"
+                                            f"• **Linha 2.5 Gols:** {stats['mais_2_5']}\n"
+                                            f"• **Base de Escanteios:** `{stats['proj_cantos']}+ cantos`\n"
+                                            f"• **Base de Cartões:** `{stats['proj_cartoes']}+ cartões`"
                                         )
                                     except Exception as e:
-                                        print(f"Erro pré-jogo chat {chat_id}: {e}")
+                                        print(f"Erro pré-jogo: {e}")
 
-                            # 2. Alertas Ao Vivo (Gols, Cantos, Cartões e Vermelho)
+                            # Alertas Ao Vivo
                             elif status_tipo == "STATUS_IN_PROGRESS":
                                 placar_casa = competidores[0].get("score", "0")
                                 placar_fora = competidores[1].get("score", "0")
@@ -138,41 +140,10 @@ def varredura_autonoma_jogos():
                                                 f"⚽🔥 **ALERTA AO VIVO: GOLS**\n\n"
                                                 f"• Jogo: `{time_casa} {placar_casa} x {placar_fora} {time_fora}`\n"
                                                 f"• Tempo: *{tempo_jogo}* | `{nome_liga}`\n"
-                                                f"• **Análise:** Média combinada de `{stats['soma_gols']}` gols.\n"
-                                                f"💡 *Sugestão de Entrada:* Over Gols / 2º Tempo Forte ({stats['gol_2t']})."
+                                                f"• **Análise:** Média de `{stats['soma_gols']}` gols. Pressão forte no 2º tempo!"
                                             )
                                         except Exception as e:
                                             print(f"Erro alerta gol: {e}")
-
-                                chave_cantos = f"{jogo_id}_cantos"
-                                if stats['proj_cantos'] >= 9 and chave_cantos not in jogos_cantos_enviado:
-                                    jogos_cantos_enviado.add(chave_cantos)
-                                    for chat_id in chats_ativos:
-                                        try:
-                                            bot.send_message(
-                                                chat_id,
-                                                f"🚩🔥 **ALERTA AO VIVO: ESCANTEIOS**\n\n"
-                                                f"• Jogo: `{time_casa} {placar_casa} x {placar_fora} {time_fora}`\n"
-                                                f"• Tempo: *{tempo_jogo}* | `{nome_liga}`\n"
-                                                f"• **Projeção:** `{stats['proj_cantos']}+ cantos`."
-                                            )
-                                        except Exception as e:
-                                            print(f"Erro alerta cantos: {e}")
-
-                                chave_cartoes = f"{jogo_id}_cartoes"
-                                if stats['proj_cartoes'] >= 4 and chave_cartoes not in jogos_cartoes_enviado:
-                                    jogos_cartoes_enviado.add(chave_cartoes)
-                                    for chat_id in chats_ativos:
-                                        try:
-                                            bot.send_message(
-                                                chat_id,
-                                                f"🟨🔥 **ALERTA AO VIVO: CARTÕES & VERMELHO**\n\n"
-                                                f"• Jogo: `{time_casa} {placar_casa} x {placar_fora} {time_fora}`\n"
-                                                f"• Tempo: *{tempo_jogo}* | `{nome_liga}`\n"
-                                                f"• **Disciplina:** {stats['chance_vermelho']}"
-                                            )
-                                        except Exception as e:
-                                            print(f"Erro alerta cartões: {e}")
 
             except Exception as e:
                 print(f"Erro na varredura da liga {liga_key}: {e}")
@@ -183,15 +154,15 @@ def enviar_boas_vindas(mensagem):
     chats_ativos.add(mensagem.chat.id)
     bot.reply_to(
         mensagem, 
-        "🤖 **Bot do Tico Ativo com Análises Completas!**\n\n"
-        "• Digite a sigla ou nome da liga (ex: `arg.1`, `libertadores`, `bra.1`) para ver os jogos de hoje.\n"
-        "• Digite o nome de qualquer time para ver o **Raio-X Analítico Completo** (Gols, Cantos, Cartões, 1º/2º Tempo e Vermelho)."
+        "🤖 **Bot de Análises de Futebol Ativo!**\n\n"
+        "• Digite a sigla ou nome da liga (ex: `arg.1`, `libertadores`, `bra.1`) para ver os jogos do dia ou da noite.\n"
+        "• Digite o nome de qualquer time para ver o **Raio-X Completo** (Vitória, Ambas Marcam, Linhas de 1.5 e 2.5, Escanteios e Cartões)."
     )
 
 @bot.message_handler(commands=['ligas'])
 def listar_ligas(mensagem):
     chats_ativos.add(mensagem.chat.id)
-    texto_ligas = "🏆 **Ligas e Copas Monitoradas:**\n\n"
+    texto_ligas = "🏆 **Ligas Monitoradas:**\n\n"
     for chave, nome in ligas_monitoradas.items():
         texto_ligas += f"• `{chave}` — *{nome}*\n"
     bot.reply_to(mensagem, texto_ligas)
@@ -222,7 +193,7 @@ def analisar_texto_geral(mensagem):
             if resp.status_code == 200:
                 eventos = resp.json().get("events", [])
                 if eventos:
-                    resposta_jogos = f"🏆 **Jogos de Hoje — {ligas_monitoradas[liga_encontrada_key]}**:\n\n"
+                    resposta_jogos = f"🏆 **Jogos de Hoje/Noite — {ligas_monitoradas[liga_encontrada_key]}**:\n\n"
                     for ev in eventos:
                         comps = ev.get("competitions", [{}])[0].get("competitors", [])
                         if len(comps) >= 2:
@@ -244,13 +215,13 @@ def analisar_texto_geral(mensagem):
                     bot.send_message(chat_id, resposta_jogos)
                     return
         except Exception as e:
-            print(f"Erro ao buscar jogos da liga: {e}")
+            print(f"Erro ao buscar jogos: {e}")
         
-        bot.send_message(chat_id, f"⚠️ Não encontrei partidas agendadas para essa liga na grade de hoje.")
+        bot.send_message(chat_id, f"⚠️ Não encontrei partidas para essa liga na grade de hoje.")
         return
 
-    # 2. Busca por Time (Raio-X Completo)
-    bot.reply_to(mensagem, f"🔍 Gerando Raio-X analítico completo...")
+    # 2. Busca por Time (Raio-X Detalhado)
+    bot.reply_to(mensagem, f"🔍 Gerando análise completa...")
     jogo_encontrado = None
     
     for liga_key in ligas_monitoradas.keys():
@@ -279,32 +250,31 @@ def analisar_texto_geral(mensagem):
         stats = calcular_estatisticas_por_times(t_casa, t_fora)
         
         relatorio = (
-            f"📊 **RAIO-X COMPLETO & ANÁLISE DE MERCADO**\n\n"
+            f"📊 **RAIO-X COMPLETO DO JOGO**\n\n"
             f"⚽ `{t_casa} vs {t_fora}`\n"
             f"🏆 Competição: `{nome_liga}`\n"
             f"📌 Situação: *{status_desc}*\n\n"
-            f"• **Time para Ganhar (Favorito):** {stats['favorito']}\n"
-            f"• **Probabilidade de Gols:** `{stats['prob_gol']}%` (Média: {stats['soma_gols']})\n"
+            f"• **Time para Vencer (Favorito):** {stats['favorito']}\n"
             f"• **Ambos Marcam:** {stats['ambos_marcam']}\n"
-            f"• **Tendência 1º Tempo:** {stats['gol_1t']}\n"
-            f"• **Tendência 2º Tempo:** {stats['gol_2t']}\n"
-            f"• **Expectativa de Cantos:** `{stats['proj_cantos']}+ escanteios`\n"
-            f"• **Expectativa de Cartões:** `{stats['proj_cartoes']}+ cartões`\n"
-            f"• **Análise Disciplinar / Vermelho:** {stats['chance_vermelho']}"
+            f"• **Linha de 1.5 Gols:** {stats['mais_1_5']}\n"
+            f"• **Linha de 2.5 Gols:** {stats['mais_2_5']}\n"
+            f"• **Base de Escanteios:** `{stats['proj_cantos']}+ cantos`\n"
+            f"• **Base de Cartões:** `{stats['proj_cartoes']}+ cartões`\n"
+            f"• **Tendência 1º / 2º Tempo:** {stats['gol_1t']} / {stats['gol_2t']}"
         )
         bot.send_message(chat_id, relatorio)
     else:
         bot.reply_to(
             mensagem, 
             "⚠️ Time ou liga não encontrados na grade de hoje.\n"
-            "Digite o nome de um time válido ou use `/ligas` para ver os torneios monitorados."
+            "Digite o nome de um time válido ou use `/ligas` para ver os torneios."
         )
 
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot Normal de Análises Rodando!"
+    return "Bot de Análises Rodando Normal!"
 
 def rodar_telegram():
     print("Iniciando escuta...")
