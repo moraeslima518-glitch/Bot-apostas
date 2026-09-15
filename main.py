@@ -12,20 +12,20 @@ bot = telebot.TeleBot(TOKEN)
 # Lista global para armazenar os bilhetes e análises cadastradas
 bilhetes_monitorados = []
 
-# Lista completa de todas as ligas monitoradas pelo bot
+# Lista completa de todas as ligas monitoradas pelo bot (Todas as principais + Sul-Americana e Libertadores)
 ligas_monitoradas = [
-    "esp.1",          # La Liga (Espanha)
-    "eng.1",          # Premier League (Inglaterra)
-    "bra.1",          # Brasileirão Série A (Brasil)
-    "bra.2",          # Brasileirão Série B (Brasil)
-    "arg.1",          # Campeonato Argentino (Argentina)
-    "conmebol.lib",   # Copa Libertadores
-    "sco.1",          # Escócia (Premiership)
-    "ned.1",          # Holanda (Eredivisie)
-    "ita.1",          # Serie A (Itália)
-    "ger.1",          # Bundesliga (Alemanha)
-    "fra.1",          # Ligue 1 (França)
-    "uefa.champions"  # Liga dos Campeões
+    "conmebol.libertadores", # Copa Libertadores
+    "conmebol.sudamericana",  # Copa Sul-Americana
+    "bra.1",                 # Brasileirão Série A (Brasil)
+    "bra.2",                 # Brasileirão Série B (Brasil)
+    "esp.1",                 # La Liga (Espanha)
+    "eng.1",                 # Premier League (Inglaterra)
+    "arg.1",                 # Campeonato Argentino (Argentina)
+    "ita.1",                 # Serie A (Itália)
+    "ger.1",                 # Bundesliga (Alemanha)
+    "fra.1",                 # Ligue 1 (França)
+    "ned.1",                 # Holanda (Eredivisie)
+    "uefa.champions"         # Liga dos Campeões
 ]
 
 # Conjuntos individuais para controle de alertas automáticos
@@ -53,7 +53,7 @@ def calcular_estatisticas_por_times(time_casa, time_fora):
 
 # Função de Varredura Autônoma com Alertas Independentes
 def varredura_autonoma_jogos():
-    print("Iniciando varredura com alertas individuais e separados...")
+    print("Iniciando varredura com todas as ligas e torneios...")
     while True:
         for liga in ligas_monitoradas:
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
@@ -87,7 +87,7 @@ def varredura_autonoma_jogos():
                                     except Exception as e:
                                         print(f"Erro pré-jogo: {e}")
 
-                            # 2. ENTRADA AO VIVO: GOLS, CANTO E CARTÕES SEPARADOS
+                            # 2. ENTRADA AO VIVO: GOLS, CANTO E CARTÕES SEPARADOS (Independentes)
                             elif status_tipo == "STATUS_IN_PROGRESS":
                                 placar_casa = competidores[0].get("score", "0")
                                 placar_fora = competidores[1].get("score", "0")
@@ -172,29 +172,28 @@ def varredura_autonoma_jogos():
         
         time.sleep(60)
 
-# Comandos do Bot
+# Comandos Padrão do Bot
 @bot.message_handler(commands=['start', 'help'])
 def enviar_boas_vindas(mensagem):
     bot.reply_to(
         mensagem, 
         "🤖 **Bot do Tico Ativo!**\n\n"
-        "• Envie o nome de um jogo ou texto de bilhete para receber uma **Análise Inteligente e Específica** na hora.\n"
-        "• O radar autônomo continua mandando alertas separados de Gols, Cantos e Cartões em segundo plano."
+        "• Digite o nome de qualquer time para ver o raio-x instantâneo.\n"
+        "• O radar autônomo monitora todas as ligas e copas em segundo plano."
     )
 
-# ANÁLISE INTELIGENTE DE BILHETE / TEXTO ENVIADO PELO USUÁRIO
+# ANÁLISE DE TEXTO / JOGO ENVIADO PELO USUÁRIO
 @bot.message_handler(content_types=['text'])
 def analisar_bilhete_texto(mensagem):
     texto_usuario = mensagem.text.strip()
     
-    # Se for comando de liga, deixa passar para o handler de liga se houver, senão processa como aposta
+    # Ignora se começar com barra de comando do sistema para não conflitar
     if texto_usuario.startswith('/'):
         return
 
     chat_id = mensagem.chat.id
-    bot.reply_to(mensagem, f"🔍 Analisando os dados da sua aposta/jogo...")
+    bot.reply_to(mensagem, f"🔍 Buscando dados do jogo na grade...")
 
-    # Varre as ligas para achar um jogo correspondente ao que o usuário digitou
     jogo_encontrado = None
     for liga in ligas_monitoradas:
         url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard"
@@ -208,7 +207,6 @@ def analisar_bilhete_texto(mensagem):
                         t_casa = comps[0].get("team", {}).get("displayName", "")
                         t_fora = comps[1].get("team", {}).get("displayName", "")
                         
-                        # Verifica se o texto enviado pelo usuário menciona algum dos times
                         if t_casa.lower() in texto_usuario.lower() or t_fora.lower() in texto_usuario.lower():
                             jogo_encontrado = (t_casa, t_fora, liga, ev)
                             break
@@ -223,7 +221,7 @@ def analisar_bilhete_texto(mensagem):
         mc, mf, soma, prob_gol, proj_cantos, proj_cartoes, fav = calcular_estatisticas_por_times(t_casa, t_fora)
         
         relatorio = (
-            f"📊 **RAIO-X DO JOGO ANALISADO**\n\n"
+            f"📊 **RAIO-X DO JOGO ENCONTRADO**\n\n"
             f"⚽ **{t_casa} vs {t_fora}**\n"
             f"🏆 Competição: `{liga.upper()}`\n"
             f"📌 Situação: *{status_desc}*\n\n"
@@ -235,12 +233,11 @@ def analisar_bilhete_texto(mensagem):
         )
         bot.send_message(chat_id, relatorio)
     else:
-        # Se não achar o jogo exato na API mas o usuário mandou o bilhete, registra para o fim de jogo
         bilhetes_monitorados.append({"chat_id": chat_id, "conteudo": texto_usuario, "tipo": "texto"})
         bot.reply_to(
             mensagem, 
-            f"📝 **Bilhete Registrado com Sucesso!**\n\n"
-            f"Não encontrei esse jogo ao vivo na grade exata de agora, mas ele entrou na nossa lista para aviso automático de resultado (Green/Red) assim que terminar!"
+            f"📝 **Bilhete Registrado!**\n\n"
+            f"Não encontrei esse jogo ao vivo na grade agora, mas ele entrou no monitoramento para aviso de Green/Red no final!"
         )
 
 @bot.message_handler(content_types=['photo'])
@@ -249,15 +246,14 @@ def receber_bilhete_foto(mensagem):
     bilhetes_monitorados.append({"chat_id": chat_id, "conteudo": "Print", "tipo": "foto"})
     bot.reply_to(
         mensagem, 
-        "📸 **Print de Bilhete Capturado!**\n\n"
-        "Monitoramento ativado em segundo plano para o resultado final desta aposta."
+        "📸 **Print Capturado!** Monitoramento ativado para o apito final."
     )
 
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot rodando com análise interativa e alertas isolados!"
+    return "Bot rodando com todas as ligas e torneios!"
 
 def rodar_telegram():
     print("Iniciando escuta...")
