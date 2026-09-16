@@ -32,7 +32,7 @@ def limpar_markdown(texto):
         return ""
     return str(texto).replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
 
-# ANÁLISE PRÉ-JOGO TURBINADA E PROFISSIONAL
+# ANÁLISE PRÉ-JOGO TURBINADA E PROFISSIONAL (COM AMBAS MARCAM)
 def analisar_gols(time_casa, time_fora):
     h_hash = sum(ord(c) for c in time_casa)
     a_hash = sum(ord(c) for c in time_fora)
@@ -175,6 +175,7 @@ def enviar_grade_do_dia():
                             f"📊 **Projeção:**\n"
                             f"• Mais 1.5: `{analise['mais_1_5']}`\n"
                             f"• Mais 2.5: `{analise['mais_2_5']}`\n"
+                            f"• Ambas Marcam: `{analise['ambos_marcam']}`\n"
                             f"• Chance 1º Tempo: `{analise['chance_1t']}`\n"
                             f"-----------------------------------"
                         )
@@ -254,7 +255,8 @@ def monitoramento_ao_vivo():
                                                 f"🚨⚡ **ENTRADA DE PRESSÃO ({etapa_txt})** ⚡🚨\n\n"
                                                 f"• Jogo: `{t_casa} {p_casa} x {p_fora} {t_fora}`\n"
                                                 f"• Relógio: *{tempo_str}* | `{nome_amigavel}`\n"
-                                                f"🎯 **Leitura:** Volume ofensivo forte. Média projetada: `{analise['media']}`\n"
+                                                f"🎯 **Leitura:** Média projetada: `{analise['media']}`\n"
+                                                f"🔥 **Ambas Marcam:** `{analise['ambos_marcam']}`\n"
                                                 f"💡 Alta probabilidade de gol iminente!"
                                             )
                                         except:
@@ -267,7 +269,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot Sniper Pro Rodando!"
+    return "Bot Sniper Pro Rodando com Ambas Marcam!"
 
 def rodar_telegram():
     print("Iniciando bot no Telegram...")
